@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS orders (
     user_id INTEGER,
     username TEXT,
     user_name TEXT,
-    uc_amount TEXT,
+    product_type TEXT,
+    product_amount TEXT,
     pubg_id TEXT,
     price TEXT,
     invoice_id TEXT,
@@ -44,10 +45,61 @@ conn.commit()
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
+        InlineKeyboardButton("🎮 Metro Royale", callback_data="metro"),
         InlineKeyboardButton("💰 Купить UC", callback_data="buy"),
         InlineKeyboardButton("📦 Мои заказы", callback_data="orders"),
         InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
         InlineKeyboardButton("🔗 Поддержка", url="https://t.me/your_support")
+    )
+    return kb
+
+def metro_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🔫 Оружие", callback_data="metro_weapons"),
+        InlineKeyboardButton("🛡️ Броня", callback_data="metro_armor"),
+        InlineKeyboardButton("🎒 Рюкзаки", callback_data="metro_backpacks"),
+        InlineKeyboardButton("💎 Ключи", callback_data="metro_keys"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="back")
+    )
+    return kb
+
+def metro_weapons_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("MK14 — 5$", callback_data="metro_mk14_5"),
+        InlineKeyboardButton("M249 — 4$", callback_data="metro_m249_4"),
+        InlineKeyboardButton("AWM — 6$", callback_data="metro_awm_6"),
+        InlineKeyboardButton("Groza — 3$", callback_data="metro_groza_3"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
+    )
+    return kb
+
+def metro_armor_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("Шлем 6 ур. — 8$", callback_data="metro_helmet_8"),
+        InlineKeyboardButton("Бронежилет 6 ур. — 10$", callback_data="metro_vest_10"),
+        InlineKeyboardButton("Шлем 5 ур. — 5$", callback_data="metro_helmet_5"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
+    )
+    return kb
+
+def metro_backpacks_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("Рюкзак 6 ур. — 7$", callback_data="metro_bag_7"),
+        InlineKeyboardButton("Рюкзак 5 ур. — 4$", callback_data="metro_bag_4"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
+    )
+    return kb
+
+def metro_keys_menu():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("Ключ от склада — 3$", callback_data="metro_key_3"),
+        InlineKeyboardButton("Ключ от бункера — 5$", callback_data="metro_key_5"),
+        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
     )
     return kb
 
@@ -102,13 +154,13 @@ def check_invoice(invoice_id):
 # ===== ХРАНИЛИЩЕ =====
 user_state = {}
 
-# ===== КОМАНДА START С КАРТИНКОЙ (AKUMA UC SHOP) =====
+# ===== КОМАНДА START =====
 @dp.message_handler(commands=['start'])
 async def start(msg: types.Message):
     await msg.answer_photo(
         photo=WELCOME_IMAGE,
         caption="👋 **Добро пожаловать в Akuma UC SHOP!**\n\n"
-                "⚡ Быстрая покупка UC через CryptoBot\n\n"
+                "⚡ Быстрая покупка UC и Metro Royale\n\n"
                 "🟢 Мы работаем 24/7\n\n"
                 "👇 **Выберите действие в меню ниже:**",
         reply_markup=main_menu(),
@@ -120,10 +172,89 @@ async def start(msg: types.Message):
 async def callbacks(call: types.CallbackQuery):
     user_id = call.from_user.id
 
-    if call.data == "buy":
+    # ===== METRO ROYALE =====
+    if call.data == "metro":
         await call.message.edit_caption(
-            caption="💰 **Выберите количество UC:**\n\n"
-                    "Нажмите на нужный пакет:",
+            caption="🎮 **METRO ROYALE**\n\nВыберите категорию товаров:",
+            reply_markup=metro_menu(),
+            parse_mode="Markdown"
+        )
+        await call.answer()
+
+    elif call.data == "metro_back":
+        await call.message.edit_caption(
+            caption="🎮 **METRO ROYALE**\n\nВыберите категорию товаров:",
+            reply_markup=metro_menu(),
+            parse_mode="Markdown"
+        )
+        await call.answer()
+
+    elif call.data == "metro_weapons":
+        await call.message.edit_caption(
+            caption="🔫 **Оружие Metro Royale**\n\nВыберите оружие:",
+            reply_markup=metro_weapons_menu(),
+            parse_mode="Markdown"
+        )
+        await call.answer()
+
+    elif call.data == "metro_armor":
+        await call.message.edit_caption(
+            caption="🛡️ **Броня Metro Royale**\n\nВыберите броню:",
+            reply_markup=metro_armor_menu(),
+            parse_mode="Markdown"
+        )
+        await call.answer()
+
+    elif call.data == "metro_backpacks":
+        await call.message.edit_caption(
+            caption="🎒 **Рюкзаки Metro Royale**\n\nВыберите рюкзак:",
+            reply_markup=metro_backpacks_menu(),
+            parse_mode="Markdown"
+        )
+        await call.answer()
+
+    elif call.data == "metro_keys":
+        await call.message.edit_caption(
+            caption="💎 **Ключи Metro Royale**\n\nВыберите ключ:",
+            reply_markup=metro_keys_menu(),
+            parse_mode="Markdown"
+        )
+        await call.answer()
+
+    # ===== ОБРАБОТКА METRO ТОВАРОВ =====
+    elif call.data.startswith("metro_"):
+        parts = call.data.split("_")
+        if len(parts) >= 3:
+            product = parts[1]
+            price = parts[2]
+            
+            if product == "mk14":
+                amount = "MK14"
+            elif product == "m249":
+                amount = "M249"
+            elif product == "awm":
+                amount = "AWM"
+            elif product == "groza":
+                amount = "Groza"
+            elif product == "helmet":
+                amount = "Шлем 6 ур."
+            elif product == "vest":
+                amount = "Бронежилет 6 ур."
+            elif product == "bag":
+                amount = "Рюкзак 6 ур."
+            elif product == "key":
+                amount = "Ключ"
+            else:
+                amount = product
+            
+            user_state[user_id] = {"price": price, "amount": amount, "product_type": "metro"}
+            await bot.send_message(user_id, "📩 **Введите ваш PUBG ID** (только цифры):", parse_mode="Markdown")
+            await call.answer()
+
+    # ===== UC =====
+    elif call.data == "buy":
+        await call.message.edit_caption(
+            caption="💰 **Выберите количество UC:**\n\nНажмите на нужный пакет:",
             reply_markup=uc_menu(),
             parse_mode="Markdown"
         )
@@ -133,24 +264,24 @@ async def callbacks(call: types.CallbackQuery):
         price = call.data.split("_")[1]
         
         if price == "1":
-            amount = "60"
+            amount = "60 UC"
         elif price == "4":
-            amount = "325"
+            amount = "325 UC"
         elif price == "8":
-            amount = "660"
+            amount = "660 UC"
         elif price == "20":
-            amount = "1800"
+            amount = "1800 UC"
         else:
-            amount = price
+            amount = price + " UC"
         
-        user_state[user_id] = {"price": price, "amount": amount}
+        user_state[user_id] = {"price": price, "amount": amount, "product_type": "uc"}
         await bot.send_message(user_id, "📩 **Введите ваш PUBG ID** (только цифры):", parse_mode="Markdown")
         await call.answer()
 
     elif call.data == "back":
         await call.message.edit_caption(
             caption="👋 **Добро пожаловать в Akuma UC SHOP!**\n\n"
-                    "⚡ Быстрая покупка UC через CryptoBot\n\n"
+                    "⚡ Быстрая покупка UC и Metro Royale\n\n"
                     "🟢 Мы работаем 24/7\n\n"
                     "👇 **Выберите действие в меню ниже:**",
             reply_markup=main_menu(),
@@ -159,7 +290,7 @@ async def callbacks(call: types.CallbackQuery):
         await call.answer()
 
     elif call.data == "orders":
-        cursor.execute("SELECT id, uc_amount, price, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (user_id,))
+        cursor.execute("SELECT id, product_type, product_amount, price, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (user_id,))
         data = cursor.fetchall()
 
         if not data:
@@ -167,7 +298,7 @@ async def callbacks(call: types.CallbackQuery):
         else:
             text = "📦 **Ваши заказы:**\n\n"
             for o in data:
-                text += f"🆔 #{o[0]} | {o[1]} UC | {o[2]}$ | {o[3]}\n📅 {o[4]}\n\n"
+                text += f"🆔 #{o[0]} | {o[1]} | {o[2]} | {o[3]}$ | {o[4]}\n📅 {o[5]}\n\n"
             await call.message.answer(text, parse_mode="Markdown")
         await call.answer()
 
@@ -201,8 +332,8 @@ async def get_id(msg: types.Message):
     data = user_state.pop(user_id)
     price = data["price"]
     amount = data["amount"]
+    product_type = data.get("product_type", "uc")
     
-    # Получаем имя пользователя
     user_name = msg.from_user.first_name or "Пользователь"
     username = msg.from_user.username or "Нет username"
 
@@ -212,12 +343,13 @@ async def get_id(msg: types.Message):
         return
 
     cursor.execute("""
-        INSERT INTO orders (user_id, username, user_name, uc_amount, pubg_id, price, invoice_id, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, user_name, product_type, product_amount, pubg_id, price, invoice_id, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         user_id,
         username,
         user_name,
+        product_type,
         amount,
         pubg_id,
         price,
@@ -230,7 +362,7 @@ async def get_id(msg: types.Message):
     await msg.answer(
         f"✅ **Заказ создан!**\n\n"
         f"🆔 **PUBG ID:** {pubg_id}\n"
-        f"📦 **UC:** {amount} UC\n"
+        f"📦 **Товар:** {amount}\n"
         f"💰 **Сумма:** {price}$ USDT\n\n"
         f"👇 **Нажмите на кнопку для оплаты:**",
         reply_markup=pay_menu(pay_url, invoice_id),
@@ -244,8 +376,8 @@ async def get_id(msg: types.Message):
         f"👤 **Имя:** {user_name}\n"
         f"🆔 **Username:** @{username if username != 'Нет username' else 'Нет'}\n"
         f"🆔 **User ID:** `{user_id}`\n"
+        f"📦 **Товар:** {amount}\n"
         f"🆔 **PUBG ID:** {pubg_id}\n"
-        f"📦 **UC:** {amount} UC\n"
         f"💰 **Сумма:** {price}$ USDT\n"
         f"🆔 **Invoice:** `{invoice_id}`\n"
         f"📅 **Время:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
