@@ -59,12 +59,21 @@ def apply_promo(code, user_id):
     promo = promocodes.get(code)
     if not promo:
         return None, "❌ Промокод не найден"
+    if promo.get("expires") and datetime.now() > datetime.fromisoformat(promo["expires"]):
+        return None, "❌ Срок действия истёк"
+    if promo.get("max_uses") and promo.get("uses", 0) >= promo["max_uses"]:
+        return None, "❌ Промокод использован максимальное количество раз"
+    if user_id in promo.get("used_by", []):
+        return None, "❌ Вы уже использовали этот промокод"
     return promo["discount"], None
 
 def use_promo(code, user_id):
     promo = promocodes.get(code)
     if promo:
         promo["uses"] = promo.get("uses", 0) + 1
+        if "used_by" not in promo:
+            promo["used_by"] = []
+        promo["used_by"].append(user_id)
         save_promocodes()
         return True
     return False
@@ -203,7 +212,7 @@ def admin_products_menu():
     for pid, p in PRODUCTS.items():
         status = "✅" if p["active"] else "❌"
         keyboard.add(InlineKeyboardButton(f"{status} {p['name']} — {p['price']}₽", callback_data=f"admin_edit_{pid}"))
-    keyboard.add(InlineKeyboardButton("➕ Добавить", callback_data="admin_add_product"))
+    keyboard.add(InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product"))
     keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
     return keyboard
 
@@ -271,8 +280,7 @@ async def handle(callback: types.CallbackQuery):
     elif data == "cat_vpn":
         await update_message(chat_id, user_id, "🌐 **ИНТЕРНЕТ БЕЗ ОГРАНИЧЕНИЙ:**", catalog_keyboard("vpn"), "Markdown")
     elif data == "cat_sub":
-        await update_message(chat_id, user_id, "📦 **ВЫБЕРИТЕ ПОДПИСКУ:**", None, "Markdown")
-        await update_message(chat_id, user_id, "🚧 Раздел в разработке", main_menu())
+        await update_message(chat_id, user_id, "🚧 **РАЗДЕЛ В РАЗРАБОТКЕ**", main_menu(), "Markdown")
     
     # Просмотр товара
     elif data.startswith("view_"):
@@ -395,7 +403,7 @@ async def handle(callback: types.CallbackQuery):
     elif data == "leave_review":
         await update_message(chat_id, user_id, "⭐ **ОЦЕНИТЕ НАШ МАГАЗИН:**", reviews_keyboard(), "Markdown")
     
-    # Промокод
+    # Промокод от пользователя
     elif data == "enter_promo":
         admin_state[user_id] = "waiting_promo"
         await update_message(chat_id, user_id, "🎟️ **ВВЕДИТЕ ПРОМОКОД:**\n\nОтправьте код текстом.", None, "Markdown")
@@ -414,11 +422,12 @@ async def handle(callback: types.CallbackQuery):
         text = "👋 Добро пожаловать в магазин Akuma UC BOT!\n\nИспользуйте меню ниже для навигации:"
         await update_message(chat_id, user_id, text, main_menu())
     
-    elif data in ["other_games", "tg_products", "cat_sub"]:
+    elif data in ["other_games", "tg_products"]:
         await update_message(chat_id, user_id, "🚧 **РАЗДЕЛ В РАЗРАБОТКЕ**", main_menu(), "Markdown")
 
     # ==================== АДМИНКА ====================
-    # Админ панель - товары
+    
+    # Товары
     elif data == "admin_products" and is_admin(user_id):
         await update_message(chat_id, user_id, "📦 **Управление товарами:**", admin_products_menu(), "Markdown")
     
@@ -455,9 +464,9 @@ async def handle(callback: types.CallbackQuery):
     
     elif data == "admin_add_product" and is_admin(user_id):
         admin_state[user_id] = "wait_product"
-        await update_message(chat_id, user_id, "➕ Добавление товара:\n\nФормат: `id|название|цена|категория`\n\nПример: `new_1|Новый товар|500|uc`", None, "Markdown")
+        await update_message(chat_id, user_id, "➕ **Добавление товара**\n\nФормат: `id|название|цена|категория`\n\nКатегории: uc, vpn, sub\n\nПример: `vpn_pro|VPN PRO|500|vpn`", None, "Markdown")
     
-    # Админ панель - заказы
+    # Заказы
     elif data == "admin_orders" and is_admin(user_id):
         if not orders:
             await update_message(chat_id, user_id, "📭 Заказов пока нет", admin_menu(), "Markdown")
@@ -502,7 +511,7 @@ async def handle(callback: types.CallbackQuery):
             save_orders()
             await update_message(chat_id, user_id, f"❌ Заказ #{order_id} отклонён", admin_menu(), "Markdown")
     
-    # Админ панель - ожидают оплаты
+    # Ожидают оплаты
     elif data == "admin_pending" and is_admin(user_id):
         paid_orders = [o for o in orders if o["status"] == "paid"]
         if not paid_orders:
@@ -513,7 +522,7 @@ async def handle(callback: types.CallbackQuery):
                 text += f"#{o['id']} | {o['user_link']} | {o['total']}₽\n"
             await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
     
-    # Админ панель - статистика
+    # Статистика
     elif data == "admin_stats" and is_admin(user_id):
         total_orders = len(orders)
         completed = len([o for o in orders if o["status"] == "completed"])
@@ -522,7 +531,7 @@ async def handle(callback: types.CallbackQuery):
         text = f"📊 **СТАТИСТИКА ПРОДАЖ**\n\n📦 Всего заказов: {total_orders}\n✅ Выполнено: {completed}\n⏳ Оплачено: {paid}\n💰 Выручка: {revenue}₽\n⭐ Отзывов: {len(reviews)}"
         await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
     
-    # Админ панель - чаты поддержки
+    # Чаты поддержки
     elif data == "admin_support_chats" and is_admin(user_id):
         if not support_requests:
             await update_message(chat_id, user_id, "💬 Нет активных чатов поддержки", admin_menu(), "Markdown")
@@ -532,7 +541,7 @@ async def handle(callback: types.CallbackQuery):
                 text += f"• {uid}\n"
             await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
     
-    # Админ панель - отзывы
+    # Отзывы админка
     elif data == "admin_reviews" and is_admin(user_id):
         if not reviews:
             await update_message(chat_id, user_id, "⭐ Отзывов пока нет", admin_menu(), "Markdown")
@@ -554,30 +563,55 @@ async def handle(callback: types.CallbackQuery):
         else:
             await update_message(chat_id, user_id, "❌ Нет отзывов", admin_menu(), "Markdown")
     
-    # Админ панель - промокоды
+    # ========== ПРОМОКОДЫ (РАБОТАЕТ!) ==========
     elif data == "admin_promocodes" and is_admin(user_id):
         if not promocodes:
-            await update_message(chat_id, user_id, "🎟️ Промокодов пока нет", admin_menu(), "Markdown")
+            text = "🎟️ **ПРОМОКОДЫ**\n\nПока нет промокодов.\n\nНажмите «➕ Добавить промокод» чтобы создать."
         else:
             text = "🎟️ **СПИСОК ПРОМОКОДОВ**\n\n"
             for code, promo in promocodes.items():
-                text += f"• {code} — скидка {promo['discount']}%\n"
-            kb = InlineKeyboardMarkup(row_width=1)
-            kb.add(InlineKeyboardButton("➕ Добавить промокод", callback_data="admin_add_promo"))
-            kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
-            await update_message(chat_id, user_id, text, kb, "Markdown")
+                text += f"• `{code}` — скидка {promo['discount']}% (использован: {promo.get('uses', 0)} раз)\n"
+        kb = InlineKeyboardMarkup(row_width=1)
+        kb.add(InlineKeyboardButton("➕ Добавить промокод", callback_data="admin_add_promo"))
+        kb.add(InlineKeyboardButton("🗑 Удалить промокод", callback_data="admin_delete_promo"))
+        kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+        await update_message(chat_id, user_id, text, kb, "Markdown")
     
     elif data == "admin_add_promo" and is_admin(user_id):
         admin_state[user_id] = "wait_promo"
-        await update_message(chat_id, user_id, "🎟️ Введите промокод и скидку:\n\nФормат: `КОД|скидка`\n\nПример: `SUMMER2025|10`", None, "Markdown")
+        await update_message(chat_id, user_id, "🎟️ **СОЗДАНИЕ ПРОМОКОДА**\n\nВведите промокод в формате:\n\n`НАЗВАНИЕ|скидка`\n\n**Примеры:**\n`SUMMER2025|10`\n`WELCOME|15`\n`HAPPY|20`\n\nСкидка указывается в % (число от 1 до 100).", None, "Markdown")
     
-    # Админ панель - коды товаров
+    elif data == "admin_delete_promo" and is_admin(user_id):
+        if not promocodes:
+            await update_message(chat_id, user_id, "❌ Нет промокодов для удаления", admin_menu(), "Markdown")
+        else:
+            text = "🎟️ **ВЫБЕРИТЕ ПРОМОКОД ДЛЯ УДАЛЕНИЯ**\n\n"
+            kb = InlineKeyboardMarkup(row_width=1)
+            for code in promocodes.keys():
+                kb.add(InlineKeyboardButton(f"🗑 {code}", callback_data=f"admin_delete_promo_code_{code}"))
+            kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_promocodes"))
+            await update_message(chat_id, user_id, text, kb, "Markdown")
+    
+    elif data.startswith("admin_delete_promo_code_") and is_admin(user_id):
+        code = data.replace("admin_delete_promo_code_", "")
+        if code in promocodes:
+            del promocodes[code]
+            save_promocodes()
+            await update_message(chat_id, user_id, f"✅ Промокод `{code}` удалён", admin_menu(), "Markdown")
+        else:
+            await update_message(chat_id, user_id, "❌ Промокод не найден", admin_menu(), "Markdown")
+    
+    # Коды товаров
     elif data == "admin_codes" and is_admin(user_id):
         text = "🔑 **УПРАВЛЕНИЕ КОДАМИ ТОВАРОВ**\n\n"
+        has_auto = False
         for pid, p in PRODUCTS.items():
             if p.get("auto", False):
+                has_auto = True
                 count = len(codes.get(pid, []))
                 text += f"• {p['name']} — {count} кодов\n"
+        if not has_auto:
+            text += "Нет товаров с автовыдачей.\n\nВключите автовыдачу в настройках товара."
         kb = InlineKeyboardMarkup(row_width=1)
         for pid, p in PRODUCTS.items():
             if p.get("auto", False):
@@ -588,9 +622,9 @@ async def handle(callback: types.CallbackQuery):
     elif data.startswith("admin_add_codes_") and is_admin(user_id):
         pid = data.replace("admin_add_codes_", "")
         admin_state[user_id] = f"wait_codes_{pid}"
-        await update_message(chat_id, user_id, f"🔑 Введите коды для товара (каждый с новой строки):\n\nПример:\nCODE123\nCODE456", None, "Markdown")
+        await update_message(chat_id, user_id, f"🔑 **ДОБАВЛЕНИЕ КОДОВ**\n\nВведите коды для товара (каждый с новой строки):\n\nПример:\n`CODE123`\n`CODE456`\n`CODE789`", None, "Markdown")
     
-    # Админ панель - навигация
+    # Навигация админки
     elif data == "admin_back" and is_admin(user_id):
         await update_message(chat_id, user_id, "🔧 Админ-панель", admin_menu(), "Markdown")
     
@@ -624,75 +658,76 @@ async def handle_text(message: types.Message):
         await bot.send_message(ADMIN_ID, f"⭐ **НОВЫЙ ОТЗЫВ!**\nОт: {user_name}\nОценка: {rating}★\nТекст: {text}", parse_mode="Markdown")
         return
     
-    # Добавление промокода админом
-    if is_admin(message.from_user.id):
-        if user_id in admin_state and admin_state[user_id] == "wait_promo":
-            parts = text.split("|")
-            if len(parts) == 2:
-                code, discount = parts[0].strip().upper(), parts[1].strip()
-                try:
-                    disc = int(discount)
+    # ========== ДЕЙСТВИЯ АДМИНИСТРАТОРА ==========
+    if not is_admin(user_id):
+        return
+    
+    # Создание промокода админом
+    if user_id in admin_state and admin_state[user_id] == "wait_promo":
+        parts = text.split("|")
+        if len(parts) == 2:
+            code, discount = parts[0].strip().upper(), parts[1].strip()
+            try:
+                disc = int(discount)
+                if 1 <= disc <= 100:
                     promocodes[code] = {"discount": disc, "uses": 0}
                     save_promocodes()
-                    await update_message(message.chat.id, user_id, f"✅ Промокод `{code}` создан! Скидка: {disc}%", admin_menu(), "Markdown")
-                except:
-                    await message.answer("❌ Скидка должна быть числом!")
-            else:
-                await message.answer("❌ Неверный формат! Используйте: `КОД|скидка`")
-            del admin_state[user_id]
-            return
-        
-        # Добавление цены админом
-        if user_id in admin_state and admin_state[user_id].startswith("wait_price_"):
-            pid = admin_state[user_id].replace("wait_price_", "")
-            try:
-                new_price = int(text)
-                if pid in PRODUCTS:
-                    PRODUCTS[pid]["price"] = new_price
-                    save_products()
-                    await message.answer(f"✅ Цена изменена на {new_price}₽")
+                    await update_message(message.chat.id, user_id, f"✅ **Промокод создан!**\n`{code}` — скидка {disc}%", admin_menu(), "Markdown")
                 else:
-                    await message.answer("❌ Товар не найден")
+                    await message.answer("❌ Скидка должна быть от 1 до 100")
             except:
-                await message.answer("❌ Введите число!")
-            del admin_state[user_id]
-            await message.answer("📦 Управление товарами:", reply_markup=admin_products_menu())
-            return
-        
-        # Добавление товара админом
-        if user_id in admin_state and admin_state[user_id] == "wait_product":
-            parts = text.split("|")
-            if len(parts) >= 4:
-                pid, name, price, category = parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
-                try:
-                    PRODUCTS[pid] = {"name": name, "price": int(price), "active": True, "category": category, "auto": False}
-                    save_products()
-                    await message.answer(f"✅ Товар `{name}` добавлен в категорию {category}!", parse_mode="Markdown")
-                except:
-                    await message.answer("❌ Цена должна быть числом!")
-            else:
-                await message.answer("❌ Неверный формат! Используйте: `id|название|цена|категория`")
-            del admin_state[user_id]
-            await message.answer("📦 Управление товарами:", reply_markup=admin_products_menu())
-            return
-        
-        # Добавление кодов админом
-        if user_id in admin_state and admin_state[user_id].startswith("wait_codes_"):
-            pid = admin_state[user_id].replace("wait_codes_", "")
-            codes_list = text.strip().split("\n")
-            added = 0
-            for code in codes_list:
-                if code.strip():
-                    add_code(pid, code.strip())
-                    added += 1
-            await update_message(message.chat.id, user_id, f"✅ Добавлено {added} кодов для товара", admin_menu(), "Markdown")
-            del admin_state[user_id]
-            return
+                await message.answer("❌ Скидка должна быть числом!")
+        else:
+            await message.answer("❌ Неверный формат! Используйте: `КОД|скидка`")
+        del admin_state[user_id]
+        return
     
-    # Сообщение в поддержку
-    if user_id in support_requests:
-        await bot.send_message(ADMIN_ID, f"💬 **Сообщение от пользователя**\nID: {user_id}\n\n{text}", parse_mode="Markdown")
-        await message.answer("✅ Сообщение отправлено администратору!")
+    # Изменение цены
+    if user_id in admin_state and admin_state[user_id].startswith("wait_price_"):
+        pid = admin_state[user_id].replace("wait_price_", "")
+        try:
+            new_price = int(text)
+            if pid in PRODUCTS:
+                PRODUCTS[pid]["price"] = new_price
+                save_products()
+                await message.answer(f"✅ Цена изменена на {new_price}₽")
+            else:
+                await message.answer("❌ Товар не найден")
+        except:
+            await message.answer("❌ Введите число!")
+        del admin_state[user_id]
+        await message.answer("📦 Управление товарами:", reply_markup=admin_products_menu())
+        return
+    
+    # Добавление товара
+    if user_id in admin_state and admin_state[user_id] == "wait_product":
+        parts = text.split("|")
+        if len(parts) >= 4:
+            pid, name, price, category = parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()
+            try:
+                PRODUCTS[pid] = {"name": name, "price": int(price), "active": True, "category": category, "auto": False}
+                save_products()
+                await message.answer(f"✅ Товар `{name}` добавлен в категорию {category}!", parse_mode="Markdown")
+            except:
+                await message.answer("❌ Цена должна быть числом!")
+        else:
+            await message.answer("❌ Неверный формат! Используйте: `id|название|цена|категория`")
+        del admin_state[user_id]
+        await message.answer("📦 Управление товарами:", reply_markup=admin_products_menu())
+        return
+    
+    # Добавление кодов
+    if user_id in admin_state and admin_state[user_id].startswith("wait_codes_"):
+        pid = admin_state[user_id].replace("wait_codes_", "")
+        codes_list = text.strip().split("\n")
+        added = 0
+        for code in codes_list:
+            if code.strip():
+                add_code(pid, code.strip())
+                added += 1
+        await update_message(message.chat.id, user_id, f"✅ Добавлено {added} кодов для товара", admin_menu(), "Markdown")
+        del admin_state[user_id]
+        return
 
 @dp.message_handler(commands=["ping"])
 async def ping(m: types.Message):
