@@ -1,24 +1,18 @@
 import os
 import logging
 import sqlite3
-import requests
 import asyncio
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-# ===== ПЕРЕМЕННЫЕ =====
 API_TOKEN = os.environ.get("BOT_TOKEN")
-CRYPTO_TOKEN = os.environ.get("CRYPTO_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8504217011"))
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
-
-# ===== КАРТИНКА =====
-WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
 
 # ===== БАЗА ДАННЫХ =====
 conn = sqlite3.connect("shop.db", check_same_thread=False)
@@ -29,386 +23,357 @@ CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     username TEXT,
-    user_name TEXT,
-    product_type TEXT,
-    product_amount TEXT,
-    pubg_id TEXT,
+    uc_amount TEXT,
     price TEXT,
-    invoice_id TEXT,
     status TEXT,
     created_at TEXT
 )
 """)
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS banned (
+    user_id INTEGER PRIMARY KEY
+)
+""")
 conn.commit()
+
+# ===== ПРОВЕРКА БАНА =====
+async def is_banned(user_id):
+    cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
+    return cursor.fetchone() is not None
 
 # ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("🎮 Metro Royale", callback_data="metro"),
         InlineKeyboardButton("💰 Купить UC", callback_data="buy"),
-        InlineKeyboardButton("📦 Мои заказы", callback_data="orders"),
+        InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
         InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
         InlineKeyboardButton("🔗 Поддержка", url="https://t.me/your_support")
-    )
-    return kb
-
-def metro_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("🔫 Оружие", callback_data="metro_weapons"),
-        InlineKeyboardButton("🛡️ Броня", callback_data="metro_armor"),
-        InlineKeyboardButton("🎒 Рюкзаки", callback_data="metro_backpacks"),
-        InlineKeyboardButton("💎 Ключи", callback_data="metro_keys"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="back")
-    )
-    return kb
-
-def metro_weapons_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("MK14 — 5$", callback_data="metro_mk14_5"),
-        InlineKeyboardButton("M249 — 4$", callback_data="metro_m249_4"),
-        InlineKeyboardButton("AWM — 6$", callback_data="metro_awm_6"),
-        InlineKeyboardButton("Groza — 3$", callback_data="metro_groza_3"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
-    )
-    return kb
-
-def metro_armor_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("Шлем 6 ур. — 8$", callback_data="metro_helmet_8"),
-        InlineKeyboardButton("Бронежилет 6 ур. — 10$", callback_data="metro_vest_10"),
-        InlineKeyboardButton("Шлем 5 ур. — 5$", callback_data="metro_helmet_5"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
-    )
-    return kb
-
-def metro_backpacks_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("Рюкзак 6 ур. — 7$", callback_data="metro_bag_7"),
-        InlineKeyboardButton("Рюкзак 5 ур. — 4$", callback_data="metro_bag_4"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
-    )
-    return kb
-
-def metro_keys_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("Ключ от склада — 3$", callback_data="metro_key_3"),
-        InlineKeyboardButton("Ключ от бункера — 5$", callback_data="metro_key_5"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="metro_back")
     )
     return kb
 
 def uc_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("60 UC — 1$", callback_data="uc_1"),
-        InlineKeyboardButton("325 UC — 4$", callback_data="uc_4"),
-        InlineKeyboardButton("660 UC — 8$", callback_data="uc_8"),
-        InlineKeyboardButton("1800 UC — 20$", callback_data="uc_20"),
+        InlineKeyboardButton("60 UC — 1$", callback_data="buy_60_1"),
+        InlineKeyboardButton("325 UC — 4$", callback_data="buy_325_4"),
+        InlineKeyboardButton("660 UC — 8$", callback_data="buy_660_8"),
+        InlineKeyboardButton("1800 UC — 20$", callback_data="buy_1800_20"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back")
     )
     return kb
 
-def pay_menu(url, invoice_id):
+def admin_menu():
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
-        InlineKeyboardButton("💳 Оплатить", url=url),
-        InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_{invoice_id}")
+        InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
+        InlineKeyboardButton("📦 Все заказы", callback_data="admin_orders"),
+        InlineKeyboardButton("✅ Выдача UC", callback_data="admin_give"),
+        InlineKeyboardButton("🚫 Бан пользователя", callback_data="admin_ban"),
+        InlineKeyboardButton("🔓 Разбан пользователя", callback_data="admin_unban"),
+        InlineKeyboardButton("🔙 Выйти", callback_data="admin_exit")
     )
     return kb
 
-# ===== ФУНКЦИИ CRYPTOBOT =====
-def create_invoice(amount):
-    url = "https://pay.crypt.bot/api/createInvoice"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-    data = {"asset": "USDT", "amount": str(amount)}
-    try:
-        r = requests.post(url, headers=headers, json=data).json()
-        if r.get("ok"):
-            return r["result"]["pay_url"], str(r["result"]["invoice_id"])
-        else:
-            logging.error(f"CryptoBot error: {r}")
-            return None, None
-    except Exception as e:
-        logging.error(f"Request failed: {e}")
-        return None, None
+def orders_keyboard(orders_list, page=0):
+    kb = InlineKeyboardMarkup(row_width=1)
+    start = page * 5
+    end = start + 5
+    for order in orders_list[start:end]:
+        status_emoji = "✅" if order[4] == "Выполнен" else "⏳"
+        kb.add(InlineKeyboardButton(
+            f"{status_emoji} #{order[0]} | {order[1]} UC | {order[3]}$",
+            callback_data=f"order_{order[0]}"
+        ))
+    
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"orders_page_{page-1}"))
+    if end < len(orders_list):
+        nav_buttons.append(InlineKeyboardButton("Вперед ▶️", callback_data=f"orders_page_{page+1}"))
+    if nav_buttons:
+        kb.row(*nav_buttons)
+    
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    return kb
 
-def check_invoice(invoice_id):
-    url = "https://pay.crypt.bot/api/getInvoices"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-    params = {"invoice_ids": invoice_id}
-    try:
-        r = requests.get(url, headers=headers, params=params).json()
-        if r.get("ok") and r["result"]["items"]:
-            return r["result"]["items"][0]["status"]
-        return None
-    except Exception as e:
-        logging.error(f"Check invoice failed: {e}")
-        return None
+def give_keyboard(order_id):
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ Выдать UC", callback_data=f"give_{order_id}"),
+        InlineKeyboardButton("🔙 Назад", callback_data="admin_back")
+    )
+    return kb
 
-# ===== ХРАНИЛИЩЕ =====
-user_state = {}
-
-# ===== КОМАНДА START =====
+# ===== ОБРАБОТЧИКИ =====
 @dp.message_handler(commands=['start'])
-async def start(msg: types.Message):
-    await msg.answer_photo(
-        photo=WELCOME_IMAGE,
-        caption="👋 **Добро пожаловать в Akuma UC SHOP!**\n\n"
-                "⚡ Быстрая покупка UC и Metro Royale\n\n"
-                "🟢 Мы работаем 24/7\n\n"
-                "👇 **Выберите действие в меню ниже:**",
-        reply_markup=main_menu(),
-        parse_mode="Markdown"
+async def start_command(message: types.Message):
+    if await is_banned(message.from_user.id):
+        await message.answer("❌ Вы забанены в этом магазине.")
+        return
+    await message.answer(
+        "👋 Добро пожаловать в UC SHOP!\n\n⚡ Быстрая покупка UC",
+        reply_markup=main_menu()
     )
 
-# ===== CALLBACK =====
-@dp.callback_query_handler(lambda c: True)
-async def callbacks(call: types.CallbackQuery):
-    user_id = call.from_user.id
-
-    # ===== METRO ROYALE =====
-    if call.data == "metro":
-        await call.message.edit_caption(
-            caption="🎮 **METRO ROYALE**\n\nВыберите категорию товаров:",
-            reply_markup=metro_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data == "metro_back":
-        await call.message.edit_caption(
-            caption="🎮 **METRO ROYALE**\n\nВыберите категорию товаров:",
-            reply_markup=metro_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data == "metro_weapons":
-        await call.message.edit_caption(
-            caption="🔫 **Оружие Metro Royale**\n\nВыберите оружие:",
-            reply_markup=metro_weapons_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data == "metro_armor":
-        await call.message.edit_caption(
-            caption="🛡️ **Броня Metro Royale**\n\nВыберите броню:",
-            reply_markup=metro_armor_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data == "metro_backpacks":
-        await call.message.edit_caption(
-            caption="🎒 **Рюкзаки Metro Royale**\n\nВыберите рюкзак:",
-            reply_markup=metro_backpacks_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data == "metro_keys":
-        await call.message.edit_caption(
-            caption="💎 **Ключи Metro Royale**\n\nВыберите ключ:",
-            reply_markup=metro_keys_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    # ===== ОБРАБОТКА METRO ТОВАРОВ =====
-    elif call.data.startswith("metro_"):
-        parts = call.data.split("_")
-        if len(parts) >= 3:
-            product = parts[1]
-            price = parts[2]
-            
-            if product == "mk14":
-                amount = "MK14"
-            elif product == "m249":
-                amount = "M249"
-            elif product == "awm":
-                amount = "AWM"
-            elif product == "groza":
-                amount = "Groza"
-            elif product == "helmet":
-                amount = "Шлем 6 ур."
-            elif product == "vest":
-                amount = "Бронежилет 6 ур."
-            elif product == "bag":
-                amount = "Рюкзак 6 ур."
-            elif product == "key":
-                amount = "Ключ"
-            else:
-                amount = product
-            
-            user_state[user_id] = {"price": price, "amount": amount, "product_type": "metro"}
-            await bot.send_message(user_id, "📩 **Введите ваш PUBG ID** (только цифры):", parse_mode="Markdown")
-            await call.answer()
-
-    # ===== UC =====
-    elif call.data == "buy":
-        await call.message.edit_caption(
-            caption="💰 **Выберите количество UC:**\n\nНажмите на нужный пакет:",
-            reply_markup=uc_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data.startswith("uc_"):
-        price = call.data.split("_")[1]
-        
-        if price == "1":
-            amount = "60 UC"
-        elif price == "4":
-            amount = "325 UC"
-        elif price == "8":
-            amount = "660 UC"
-        elif price == "20":
-            amount = "1800 UC"
-        else:
-            amount = price + " UC"
-        
-        user_state[user_id] = {"price": price, "amount": amount, "product_type": "uc"}
-        await bot.send_message(user_id, "📩 **Введите ваш PUBG ID** (только цифры):", parse_mode="Markdown")
-        await call.answer()
-
-    elif call.data == "back":
-        await call.message.edit_caption(
-            caption="👋 **Добро пожаловать в Akuma UC SHOP!**\n\n"
-                    "⚡ Быстрая покупка UC и Metro Royale\n\n"
-                    "🟢 Мы работаем 24/7\n\n"
-                    "👇 **Выберите действие в меню ниже:**",
-            reply_markup=main_menu(),
-            parse_mode="Markdown"
-        )
-        await call.answer()
-
-    elif call.data == "orders":
-        cursor.execute("SELECT id, product_type, product_amount, price, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (user_id,))
-        data = cursor.fetchall()
-
-        if not data:
-            await call.message.answer("📭 **У вас пока нет заказов.**", parse_mode="Markdown")
-        else:
-            text = "📦 **Ваши заказы:**\n\n"
-            for o in data:
-                text += f"🆔 #{o[0]} | {o[1]} | {o[2]} | {o[3]}$ | {o[4]}\n📅 {o[5]}\n\n"
-            await call.message.answer(text, parse_mode="Markdown")
-        await call.answer()
-
-    elif call.data.startswith("check_"):
-        invoice_id = call.data.split("_")[1]
-        status = check_invoice(invoice_id)
-
-        if status == "paid":
-            cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE invoice_id=?", (invoice_id,))
-            conn.commit()
-            await call.message.answer("✅ **Оплата найдена!**\n\nТовар будет выдан в ближайшее время.", parse_mode="Markdown")
-            await bot.send_message(ADMIN_ID, f"💰 **НОВЫЙ ОПЛАЧЕННЫЙ ЗАКАЗ!**\nИнвойс: {invoice_id}")
-        elif status == "expired":
-            await call.message.answer("❌ **Срок оплаты истёк.**\n\nСоздайте новый заказ.", parse_mode="Markdown")
-        else:
-            await call.message.answer("❌ **Оплата пока не найдена.**\n\nПопробуйте позже или нажмите 'Оплатить'.", parse_mode="Markdown")
-        await call.answer()
-
-# ===== ВВОД PUBG ID =====
-@dp.message_handler()
-async def get_id(msg: types.Message):
-    user_id = msg.from_user.id
-    if user_id not in user_state:
+@dp.message_handler(commands=['admin'])
+async def admin_panel(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Доступ запрещён")
         return
+    await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-    pubg_id = msg.text.strip()
-    if not pubg_id.isdigit():
-        await msg.answer("❌ **PUBG ID должен состоять только из цифр.**\n\nПопробуйте еще раз:", parse_mode="Markdown")
+# ===== ПОЛЬЗОВАТЕЛЬСКИЕ КНОПКИ =====
+@dp.callback_query_handler(lambda c: c.data == "buy")
+async def show_uc(callback: types.CallbackQuery):
+    if await is_banned(callback.from_user.id):
+        await callback.answer("❌ Вы забанены", show_alert=True)
         return
+    await callback.message.edit_text("💰 Выберите пакет:", reply_markup=uc_menu())
+    await callback.answer()
 
-    data = user_state.pop(user_id)
-    price = data["price"]
-    amount = data["amount"]
-    product_type = data.get("product_type", "uc")
+@dp.callback_query_handler(lambda c: c.data == "back")
+async def back(callback: types.CallbackQuery):
+    await callback.message.edit_text("👋 Добро пожаловать в UC SHOP!", reply_markup=main_menu())
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("buy_"))
+async def buy_uc(callback: types.CallbackQuery):
+    if await is_banned(callback.from_user.id):
+        await callback.answer("❌ Вы забанены", show_alert=True)
+        return
     
-    user_name = msg.from_user.first_name or "Пользователь"
-    username = msg.from_user.username or "Нет username"
-
-    pay_url, invoice_id = create_invoice(price)
-    if not pay_url:
-        await msg.answer("❌ **Ошибка создания платежа.**\n\nПопробуйте позже.", parse_mode="Markdown")
-        return
-
+    parts = callback.data.split("_")
+    amount = parts[1]
+    price = parts[2]
+    
     cursor.execute("""
-        INSERT INTO orders (user_id, username, user_name, product_type, product_amount, pubg_id, price, invoice_id, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, uc_amount, price, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
     """, (
-        user_id,
-        username,
-        user_name,
-        product_type,
+        callback.from_user.id,
+        callback.from_user.username or "Аноним",
         amount,
-        pubg_id,
         price,
-        invoice_id,
-        "💳 Ожидание оплаты",
+        "⏳ Ожидание",
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ))
     conn.commit()
-
-    await msg.answer(
-        f"✅ **Заказ создан!**\n\n"
-        f"🆔 **PUBG ID:** {pubg_id}\n"
-        f"📦 **Товар:** {amount}\n"
-        f"💰 **Сумма:** {price}$ USDT\n\n"
-        f"👇 **Нажмите на кнопку для оплаты:**",
-        reply_markup=pay_menu(pay_url, invoice_id),
-        parse_mode="Markdown"
-    )
+    order_id = cursor.lastrowid
     
-    # Отправка уведомления админу
-    await bot.send_message(
-        ADMIN_ID,
-        f"🆕 **НОВЫЙ ЗАКАЗ!**\n\n"
-        f"👤 **Имя:** {user_name}\n"
-        f"🆔 **Username:** @{username if username != 'Нет username' else 'Нет'}\n"
-        f"🆔 **User ID:** `{user_id}`\n"
-        f"📦 **Товар:** {amount}\n"
-        f"🆔 **PUBG ID:** {pubg_id}\n"
-        f"💰 **Сумма:** {price}$ USDT\n"
-        f"🆔 **Invoice:** `{invoice_id}`\n"
-        f"📅 **Время:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+    await callback.message.edit_text(
+        f"✅ **Заказ #{order_id} создан!**\n\n"
+        f"📦 UC: {amount}\n"
+        f"💰 Цена: {price}$\n\n"
+        f"💳 Реквизиты для оплаты:\n"
+        f"Карта: **** **** **** 1234\n"
+        f"Крипто: USDT TRC20: TXXXXXXXXXXXXXXXXXXXXXXXX\n\n"
+        f"📌 После оплаты напишите @admin с номером заказа",
         parse_mode="Markdown"
     )
+    await callback.answer()
+    
+    await bot.send_message(ADMIN_ID, f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 {callback.from_user.username}\n📦 {amount} UC\n💰 {price}$")
 
-# ===== АВТОМАТИЧЕСКАЯ ПРОВЕРКА ОПЛАТ =====
-async def auto_check():
-    while True:
-        try:
-            cursor.execute("SELECT id, invoice_id, user_id FROM orders WHERE status='💳 Ожидание оплаты'")
-            orders = cursor.fetchall()
+@dp.callback_query_handler(lambda c: c.data == "my_orders")
+async def my_orders(callback: types.CallbackQuery):
+    cursor.execute("SELECT id, uc_amount, price, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
+    orders = cursor.fetchall()
+    
+    if not orders:
+        await callback.answer("❌ У вас нет заказов", show_alert=True)
+        return
+    
+    text = "📦 **Ваши заказы:**\n\n"
+    for o in orders:
+        text += f"🆔 #{o[0]} | {o[1]} UC | {o[2]}$ | {o[3]}\n📅 {o[4]}\n\n"
+    await callback.message.answer(text, parse_mode="Markdown")
+    await callback.answer()
 
-            for order in orders:
-                order_id, invoice_id, user_id = order
-                status = check_invoice(invoice_id)
-                if status == "paid":
-                    cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE id=?", (order_id,))
-                    conn.commit()
-                    await bot.send_message(user_id, "✅ **Ваш заказ успешно оплачен!**\n\nТовар будет выдан в ближайшее время.", parse_mode="Markdown")
-                    await bot.send_message(ADMIN_ID, f"💰 **АВТОПРОВЕРКА:** Заказ #{order_id} оплачен!")
-                elif status == "expired":
-                    cursor.execute("UPDATE orders SET status='❌ Просрочен' WHERE id=?", (order_id,))
-                    conn.commit()
-        except Exception as e:
-            logging.error(f"Auto check error: {e}")
+# ===== АДМИН КНОПКИ =====
+@dp.callback_query_handler(lambda c: c.data == "admin_stats")
+async def admin_stats(callback: types.CallbackQuery):
+    cursor.execute("SELECT COUNT(*), SUM(price) FROM orders WHERE status='Выполнен'")
+    completed = cursor.fetchone()
+    
+    cursor.execute("SELECT COUNT(*), SUM(price) FROM orders")
+    total = cursor.fetchone()
+    
+    text = (
+        f"📊 **СТАТИСТИКА**\n\n"
+        f"✅ Выполнено заказов: {completed[0] or 0}\n"
+        f"💰 Выручка: ${completed[1] or 0}\n\n"
+        f"📦 Всего заказов: {total[0] or 0}\n"
+        f"💸 Общая сумма: ${total[1] or 0}"
+    )
+    await callback.message.edit_text(text, reply_markup=admin_menu(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "admin_orders")
+async def admin_orders_list(callback: types.CallbackQuery):
+    cursor.execute("SELECT id, uc_amount, price, status, username FROM orders ORDER BY id DESC")
+    orders = cursor.fetchall()
+    
+    if not orders:
+        await callback.answer("❌ Нет заказов", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "📦 **СПИСОК ЗАКАЗОВ**\n\nВыберите заказ для выдачи:",
+        reply_markup=orders_keyboard(orders, 0),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("orders_page_"))
+async def orders_page(callback: types.CallbackQuery):
+    page = int(callback.data.split("_")[2])
+    cursor.execute("SELECT id, uc_amount, price, status, username FROM orders ORDER BY id DESC")
+    orders = cursor.fetchall()
+    
+    await callback.message.edit_text(
+        "📦 **СПИСОК ЗАКАЗОВ**\n\nВыберите заказ для выдачи:",
+        reply_markup=orders_keyboard(orders, page),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("order_"))
+async def view_order(callback: types.CallbackQuery):
+    order_id = int(callback.data.split("_")[1])
+    cursor.execute("SELECT id, user_id, username, uc_amount, price, status, created_at FROM orders WHERE id=?", (order_id,))
+    order = cursor.fetchone()
+    
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    text = (
+        f"📋 **ЗАКАЗ #{order[0]}**\n"
+        f"👤 Пользователь: @{order[2] or 'Аноним'}\n"
+        f"🆔 ID: {order[1]}\n"
+        f"📦 UC: {order[3]}\n"
+        f"💰 Цена: {order[4]}$\n"
+        f"📅 Дата: {order[6]}\n"
+        f"📌 Статус: {order[5]}"
+    )
+    await callback.message.edit_text(text, reply_markup=give_keyboard(order_id), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("give_"))
+async def give_uc(callback: types.CallbackQuery):
+    order_id = int(callback.data.split("_")[1])
+    
+    cursor.execute("SELECT user_id, uc_amount FROM orders WHERE id=?", (order_id,))
+    order = cursor.fetchone()
+    
+    if not order:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
+        return
+    
+    cursor.execute("UPDATE orders SET status='Выполнен' WHERE id=?", (order_id,))
+    conn.commit()
+    
+    await callback.message.edit_text(f"✅ UC выданы! Заказ #{order_id} выполнен.", reply_markup=admin_menu())
+    await callback.answer()
+    
+    await bot.send_message(order[0], f"✅ **ВАШ ЗАКАЗ #{order_id} ВЫПОЛНЕН!**\n📦 UC: {order[1]}\n\nСпасибо за покупку!", parse_mode="Markdown")
+    await bot.send_message(ADMIN_ID, f"✅ Заказ #{order_id} выполнен. UC выданы.")
+
+@dp.callback_query_handler(lambda c: c.data == "admin_give")
+async def admin_give_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "🔢 **ВЫДАЧА UC**\n\nВведите команду:\n`/give user_id количество`\n\nПример: `/give 123456789 1000`",
+        reply_markup=admin_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "admin_ban")
+async def admin_ban_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "🚫 **БАН ПОЛЬЗОВАТЕЛЯ**\n\nВведите команду:\n`/ban user_id`\n\nПример: `/ban 123456789`",
+        reply_markup=admin_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "admin_unban")
+async def admin_unban_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "🔓 **РАЗБАН ПОЛЬЗОВАТЕЛЯ**\n\nВведите команду:\n`/unban user_id`\n\nПример: `/unban 123456789`",
+        reply_markup=admin_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "admin_back")
+async def admin_back(callback: types.CallbackQuery):
+    await callback.message.edit_text("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "admin_exit")
+async def admin_exit(callback: types.CallbackQuery):
+    await callback.message.edit_text("👋 Добро пожаловать в UC SHOP!", reply_markup=main_menu())
+    await callback.answer()
+
+# ===== АДМИН КОМАНДЫ =====
+@dp.message_handler(commands=['give'])
+async def give_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 3:
+        await message.answer("❌ Формат: `/give user_id количество`", parse_mode="Markdown")
+        return
+    
+    try:
+        user_id = int(parts[1])
+        amount = parts[2]
         
-        await asyncio.sleep(15)
+        await bot.send_message(user_id, f"✅ **ВАМ ВЫДАНО {amount} UC!**\n\nСпасибо что с нами!", parse_mode="Markdown")
+        await message.answer(f"✅ Выдано {amount} UC пользователю {user_id}")
+    except:
+        await message.answer("❌ Ошибка! Проверьте ID пользователя.")
+
+@dp.message_handler(commands=['ban'])
+async def ban_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("❌ Формат: `/ban user_id`", parse_mode="Markdown")
+        return
+    
+    try:
+        user_id = int(parts[1])
+        cursor.execute("INSERT OR IGNORE INTO banned VALUES (?)", (user_id,))
+        conn.commit()
+        await message.answer(f"✅ Пользователь {user_id} забанен")
+    except:
+        await message.answer("❌ Ошибка!")
+
+@dp.message_handler(commands=['unban'])
+async def unban_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("❌ Формат: `/unban user_id`", parse_mode="Markdown")
+        return
+    
+    try:
+        user_id = int(parts[1])
+        cursor.execute("DELETE FROM banned WHERE user_id=?", (user_id,))
+        conn.commit()
+        await message.answer(f"✅ Пользователь {user_id} разбанен")
+    except:
+        await message.answer("❌ Ошибка!")
 
 # ===== ЗАПУСК =====
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(auto_check())
     executor.start_polling(dp, skip_updates=True)
