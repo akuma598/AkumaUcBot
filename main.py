@@ -14,13 +14,11 @@ dp = Dispatcher(bot)
 ADMIN_PASSWORD = "14022014"
 ADMIN_ID = 8504217011
 
-# ===== ДАННЫЕ =====
-user_data = {}  # {user_id: {"pubg_id": None, "selected_uc": None}}
+user_data = {}
 orders = []
 reviews = []
 support_requests = []
 
-# ===== ТОВАРЫ UC (как на скриншоте) =====
 UC_PRODUCTS = {
     "uc_60": {"amount": 60, "price": 72, "active": True},
     "uc_120": {"amount": 120, "price": 142, "active": True},
@@ -50,7 +48,6 @@ UC_PRODUCTS = {
     "uc_81000": {"amount": 81000, "price": 69552, "active": True}
 }
 
-# ===== БОЛЬШИЕ ПАКЕТЫ UC (ОТ 8100) =====
 BIG_UC_PRODUCTS = {
     "uc_8100": {"amount": 8100, "price": 6957, "active": True},
     "uc_9900": {"amount": 9900, "price": 9790, "active": True},
@@ -65,7 +62,9 @@ BIG_UC_PRODUCTS = {
 def is_admin(user_id):
     return str(user_id) == str(ADMIN_ID)
 
-# ===== ГЛАВНОЕ МЕНЮ (как на картинке) =====
+# ===== КАРТИНКА (ВАША) =====
+WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
+
 def main_menu():
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -77,7 +76,6 @@ def main_menu():
     )
     return keyboard
 
-# ===== МЕНЮ ПОКУПКИ (как на картинке) =====
 def buy_menu():
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -91,7 +89,6 @@ def buy_menu():
     )
     return keyboard
 
-# ===== КЛАВИАТУРА ВЫБОРА UC (как на картинке) =====
 def uc_selection_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=2)
     items = list(UC_PRODUCTS.items())
@@ -106,7 +103,6 @@ def uc_selection_keyboard():
     keyboard.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="buy_menu"))
     return keyboard
 
-# ===== КЛАВИАТУРА ВЫБОРА БОЛЬШИХ UC =====
 def big_uc_selection_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=2)
     items = list(BIG_UC_PRODUCTS.items())
@@ -121,7 +117,6 @@ def big_uc_selection_keyboard():
     keyboard.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="buy_menu"))
     return keyboard
 
-# ===== КЛАВИАТУРА ОТЗЫВОВ =====
 def reviews_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=5)
     keyboard.add(
@@ -134,14 +129,12 @@ def reviews_keyboard():
     keyboard.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_menu"))
     return keyboard
 
-# ===== КЛАВИАТУРА ПОДДЕРЖКИ =====
 def support_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(InlineKeyboardButton("✖️ ЗАКРЫТЬ ЧАТ", callback_data="close_support"))
     keyboard.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_menu"))
     return keyboard
 
-# ===== АДМИН МЕНЮ =====
 def admin_menu():
     keyboard = InlineKeyboardMarkup(row_width=1)
     keyboard.add(
@@ -176,20 +169,29 @@ async def update_message(chat_id, user_id, text, reply_markup=None, parse_mode=N
     msg = await bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
     last_message_id[user_id] = msg.message_id
 
-# ===== СТАРТ =====
+async def update_photo(chat_id, user_id, photo, caption, reply_markup=None):
+    msg_id = last_message_id.get(user_id)
+    try:
+        if msg_id:
+            await bot.delete_message(chat_id, msg_id)
+    except:
+        pass
+    msg = await bot.send_photo(chat_id, photo=photo, caption=caption, reply_markup=reply_markup)
+    last_message_id[user_id] = msg.message_id
+
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     user_id = str(message.from_user.id)
-    
     text = (
-        "👋 **Добро пожаловать, мы работаем 24/7**\n\n"
+        "**GADZHIK SERVICE**\n"
+        "**ТОВАРЫ**\n"
+        "**gadzhik service**\n\n"
+        "Добро пожаловать, мы работаем 24/7\n\n"
         "Здесь вы можете быстро и удобно пополнить баланс и купить товары, и подписки для популярных игр.\n\n"
-        "👇 **Используйте меню ниже:**"
+        "---"
     )
-    msg = await bot.send_message(message.chat.id, text, reply_markup=main_menu(), parse_mode="Markdown")
-    last_message_id[user_id] = msg.message_id
+    await update_photo(message.chat.id, user_id, WELCOME_IMAGE, text, main_menu())
 
-# ===== АДМИН =====
 @dp.message_handler(commands=["admin"])
 async def admin_login(message: types.Message):
     if not is_admin(message.from_user.id):
@@ -200,13 +202,11 @@ async def admin_login(message: types.Message):
     else:
         await message.answer("❌ Неверный пароль")
 
-# ===== ЗАПРОС PUBG ID =====
 async def ask_pubg_id(chat_id, user_id, uc_amount, uc_price, is_big=False):
     user_data[user_id] = {"uc_amount": uc_amount, "uc_price": uc_price, "is_big": is_big}
     text = "🔹 **Введите ваш Pubg ID начиная с 5.**\n\n(пример: 51867875896)"
     await update_message(chat_id, user_id, text, None, "Markdown")
 
-# ===== ОБРАБОТКА КНОПОК =====
 @dp.callback_query_handler(lambda c: True)
 async def handle(callback: types.CallbackQuery):
     data = callback.data
@@ -214,14 +214,16 @@ async def handle(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
     await bot.answer_callback_query(callback.id)
 
-    # ===== ГЛАВНОЕ МЕНЮ =====
     if data == "back_to_menu":
         text = (
-            "👋 **Добро пожаловать, мы работаем 24/7**\n\n"
+            "**GADZHIK SERVICE**\n"
+            "**ТОВАРЫ**\n"
+            "**gadzhik service**\n\n"
+            "Добро пожаловать, мы работаем 24/7\n\n"
             "Здесь вы можете быстро и удобно пополнить баланс и купить товары, и подписки для популярных игр.\n\n"
-            "👇 **Используйте меню ниже:**"
+            "---"
         )
-        await update_message(chat_id, user_id, text, main_menu(), "Markdown")
+        await update_photo(chat_id, user_id, WELCOME_IMAGE, text, main_menu())
     
     elif data == "buy_menu":
         await update_message(chat_id, user_id, "🛍️ **ВЫБЕРИТЕ ТИП ПОКУПКИ:**", buy_menu(), "Markdown")
@@ -259,7 +261,6 @@ async def handle(callback: types.CallbackQuery):
     elif data == "cooperation":
         await update_message(chat_id, user_id, "🤝 **СОТРУДНИЧЕСТВО**\n\nПо вопросам сотрудничества: @aakumma", buy_menu(), "Markdown")
 
-    # ===== ОТЗЫВЫ =====
     elif data == "show_reviews":
         if not reviews:
             await update_message(chat_id, user_id, "⭐ **ОТЗЫВЫ**\n\nПока нет отзывов. Будьте первым!", reviews_keyboard(), "Markdown")
@@ -280,17 +281,15 @@ async def handle(callback: types.CallbackQuery):
     
     elif data == "leave_review":
         await update_message(chat_id, user_id, "⭐ **ОЦЕНИТЕ НАШ СЕРВИС:**\n\nНажмите на количество звёзд:", reviews_keyboard(), "Markdown")
-    
-    # ===== ПОДДЕРЖКА =====
+
     elif data == "support":
         support_requests[user_id] = True
-        await update_message(chat_id, user_id, "💬 **ЧАТ ТЕХ-ПОДДЕРЖКИ**\n\nНапишите ваше сообщение. Администратор ответит вам в ближайшее время.\n\n@UCgadzhik", support_keyboard(), "Markdown")
+        await update_message(chat_id, user_id, "💬 **ЧАТ ТЕХ-ПОДДЕРЖКИ**\n\nНапишите ваше сообщение. Администратор ответит вам в ближайшее время.", support_keyboard(), "Markdown")
     
     elif data == "close_support":
         support_requests.pop(user_id, None)
         await update_message(chat_id, user_id, "🔚 Чат поддержки закрыт.", main_menu())
-    
-    # ===== АДМИНКА =====
+
     elif data == "admin_uc" and is_admin(user_id):
         await update_message(chat_id, user_id, "📦 **Управление товарами UC:**", admin_uc_menu(), "Markdown")
     
@@ -304,7 +303,7 @@ async def handle(callback: types.CallbackQuery):
             kb.add(InlineKeyboardButton("❌ Удалить", callback_data=f"admin_delete_uc_{pid}"))
             kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_uc"))
             status = "✅ Активен" if p["active"] else "❌ Неактивен"
-            await update_message(chat_id, user_id, f"📦 **{p['amount']} UC**\n{status}\n💰 Цена: {p['price']}₽", kb, "Markdown")
+            await update_message(chat_id, user_id, f"📦 **{p['amount']} UC**\n{status}\n💰 {p['price']}₽", kb, "Markdown")
     
     elif data.startswith("admin_toggle_uc_") and is_admin(user_id):
         pid = data.replace("admin_toggle_uc_", "")
@@ -384,9 +383,16 @@ async def handle(callback: types.CallbackQuery):
         await update_message(chat_id, user_id, "🔧 Админ-панель", admin_menu(), "Markdown")
     
     elif data == "admin_exit" and is_admin(user_id):
-        await update_message(chat_id, user_id, "🔚 Выход из админ-панели", main_menu())
+        text = (
+            "**GADZHIK SERVICE**\n"
+            "**ТОВАРЫ**\n"
+            "**gadzhik service**\n\n"
+            "Добро пожаловать, мы работаем 24/7\n\n"
+            "Здесь вы можете быстро и удобно пополнить баланс и купить товары, и подписки для популярных игр.\n\n"
+            "---"
+        )
+        await update_photo(chat_id, user_id, WELCOME_IMAGE, text, main_menu())
 
-# ===== ПОЛУЧЕНИЕ ЗАКАЗА ПОСЛЕ PUBG ID =====
 @dp.callback_query_handler(lambda c: c.data.startswith("pay_order_"))
 async def pay_order(callback: types.CallbackQuery):
     order_id = int(callback.data.replace("pay_order_", ""))
@@ -397,16 +403,14 @@ async def pay_order(callback: types.CallbackQuery):
     order = next((o for o in orders if o["id"] == order_id), None)
     if order and order["status"] == "pending":
         order["status"] = "paid"
-        await update_message(chat_id, user_id, f"✅ **СПАСИБО ЗА ЗАКАЗ!**\n\nВаш заказ #{order_id} принят.\n\nUC будет начислен после проверки оплаты.\n\n📌 По вопросам: @UCgadzhik", main_menu(), "Markdown")
+        await update_message(chat_id, user_id, f"✅ **СПАСИБО ЗА ЗАКАЗ!**\n\nВаш заказ #{order_id} принят.\n\nUC будет начислен после проверки оплаты.", main_menu(), "Markdown")
         await bot.send_message(ADMIN_ID, f"💰 **ЗАКАЗ #{order_id} ОПЛАЧЕН!**\n👤 {order['user_name']}\n🆔 Pubg ID: {order['pubg_id']}\n💰 {order['uc_amount']} UC = {order['total']}₽", parse_mode="Markdown")
 
-# ===== ОБРАБОТКА ТЕКСТА (PUBG ID, ОТЗЫВЫ, ПОДДЕРЖКА) =====
 @dp.message_handler()
 async def handle_text(message: types.Message):
     user_id = str(message.from_user.id)
     text = message.text.strip()
     
-    # Отзыв
     if user_id in admin_state and admin_state[user_id].startswith("wait_review_text_"):
         rating = int(admin_state[user_id].replace("wait_review_text_", ""))
         user_name = message.from_user.first_name or "Пользователь"
@@ -419,13 +423,11 @@ async def handle_text(message: types.Message):
         await bot.send_message(ADMIN_ID, f"⭐ **НОВЫЙ ОТЗЫВ!**\nОт: {user_name}\nОценка: {rating}★\nТекст: {text}", parse_mode="Markdown")
         return
     
-    # Поддержка
     if user_id in support_requests:
         await bot.send_message(ADMIN_ID, f"💬 **Сообщение от пользователя**\nID: {user_id}\nИмя: {message.from_user.first_name}\n\n{text}", parse_mode="Markdown")
-        await message.answer("✅ Сообщение отправлено администратору! @UCgadzhik")
+        await message.answer("✅ Сообщение отправлено администратору!")
         return
     
-    # Ввод PUBG ID
     if user_id in user_data and user_data[user_id].get("uc_amount"):
         pubg_id = text
         if pubg_id.isdigit() and len(pubg_id) >= 10:
@@ -449,6 +451,7 @@ async def handle_text(message: types.Message):
             
             keyboard = InlineKeyboardMarkup(row_width=1)
             keyboard.add(InlineKeyboardButton("💳 ОПЛАТИТЬ", callback_data=f"pay_order_{order_id}"))
+            keyboard.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="buy_menu"))
             
             orders.append({
                 "id": order_id, "user_id": user_id, "user_name": user_name,
@@ -463,7 +466,6 @@ async def handle_text(message: types.Message):
             await update_message(message.chat.id, user_id, "❌ **НЕВЕРНЫЙ ID!**\n\nВведите корректный Pubg ID (начинается с 5, минимум 10 цифр).", None, "Markdown")
         return
     
-    # АДМИН: изменение цены
     if is_admin(message.from_user.id):
         if user_id in admin_state and admin_state[user_id].startswith("wait_price_"):
             pid = admin_state[user_id].replace("wait_price_", "")
@@ -502,7 +504,6 @@ async def handle_text(message: types.Message):
 async def ping(m: types.Message):
     await m.answer("🏓 Bot is alive!")
 
-# ===== FLASK KEEP-ALIVE =====
 app = Flask(__name__)
 
 @app.route('/')
