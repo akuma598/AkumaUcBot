@@ -17,7 +17,7 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
 
-# ===== КАРТИНКА (ВАША) =====
+# ===== КАРТИНКА =====
 WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
 
 # ===== БАЗА ДАННЫХ =====
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     username TEXT,
+    user_name TEXT,
     uc_amount TEXT,
     pubg_id TEXT,
     price TEXT,
@@ -101,15 +102,15 @@ def check_invoice(invoice_id):
 # ===== ХРАНИЛИЩЕ =====
 user_state = {}
 
-# ===== КОМАНДА START С КАРТИНКОЙ =====
+# ===== КОМАНДА START С КАРТИНКОЙ (AKUMA UC SHOP) =====
 @dp.message_handler(commands=['start'])
 async def start(msg: types.Message):
     await msg.answer_photo(
         photo=WELCOME_IMAGE,
-        caption="👋 **Добро пожаловать в UC SHOP!**\n\n"
+        caption="👋 **Добро пожаловать в Akuma UC SHOP!**\n\n"
                 "⚡ Быстрая покупка UC через CryptoBot\n\n"
                 "🟢 Мы работаем 24/7\n\n"
-                "👇 Выберите действие в меню ниже:",
+                "👇 **Выберите действие в меню ниже:**",
         reply_markup=main_menu(),
         parse_mode="Markdown"
     )
@@ -148,10 +149,10 @@ async def callbacks(call: types.CallbackQuery):
 
     elif call.data == "back":
         await call.message.edit_caption(
-            caption="👋 **Добро пожаловать в UC SHOP!**\n\n"
+            caption="👋 **Добро пожаловать в Akuma UC SHOP!**\n\n"
                     "⚡ Быстрая покупка UC через CryptoBot\n\n"
                     "🟢 Мы работаем 24/7\n\n"
-                    "👇 Выберите действие в меню ниже:",
+                    "👇 **Выберите действие в меню ниже:**",
             reply_markup=main_menu(),
             parse_mode="Markdown"
         )
@@ -200,6 +201,10 @@ async def get_id(msg: types.Message):
     data = user_state.pop(user_id)
     price = data["price"]
     amount = data["amount"]
+    
+    # Получаем имя пользователя
+    user_name = msg.from_user.first_name or "Пользователь"
+    username = msg.from_user.username or "Нет username"
 
     pay_url, invoice_id = create_invoice(price)
     if not pay_url:
@@ -207,11 +212,12 @@ async def get_id(msg: types.Message):
         return
 
     cursor.execute("""
-        INSERT INTO orders (user_id, username, uc_amount, pubg_id, price, invoice_id, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, user_name, uc_amount, pubg_id, price, invoice_id, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         user_id,
-        msg.from_user.username or "Аноним",
+        username,
+        user_name,
         amount,
         pubg_id,
         price,
@@ -228,6 +234,21 @@ async def get_id(msg: types.Message):
         f"💰 **Сумма:** {price}$ USDT\n\n"
         f"👇 **Нажмите на кнопку для оплаты:**",
         reply_markup=pay_menu(pay_url, invoice_id),
+        parse_mode="Markdown"
+    )
+    
+    # Отправка уведомления админу
+    await bot.send_message(
+        ADMIN_ID,
+        f"🆕 **НОВЫЙ ЗАКАЗ!**\n\n"
+        f"👤 **Имя:** {user_name}\n"
+        f"🆔 **Username:** @{username if username != 'Нет username' else 'Нет'}\n"
+        f"🆔 **User ID:** `{user_id}`\n"
+        f"🆔 **PUBG ID:** {pubg_id}\n"
+        f"📦 **UC:** {amount} UC\n"
+        f"💰 **Сумма:** {price}$ USDT\n"
+        f"🆔 **Invoice:** `{invoice_id}`\n"
+        f"📅 **Время:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         parse_mode="Markdown"
     )
 
