@@ -17,6 +17,9 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 logging.basicConfig(level=logging.INFO)
 
+# ===== КАРТИНКА (ВАША) =====
+WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
+
 # ===== БАЗА ДАННЫХ =====
 conn = sqlite3.connect("shop.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -98,12 +101,17 @@ def check_invoice(invoice_id):
 # ===== ХРАНИЛИЩЕ =====
 user_state = {}
 
-# ===== КОМАНДА START =====
+# ===== КОМАНДА START С КАРТИНКОЙ =====
 @dp.message_handler(commands=['start'])
 async def start(msg: types.Message):
-    await msg.answer(
-        "👋 Добро пожаловать в UC SHOP\n\n⚡ Быстрая покупка UC\n\nВыберите действие:",
-        reply_markup=main_menu()
+    await msg.answer_photo(
+        photo=WELCOME_IMAGE,
+        caption="👋 **Добро пожаловать в UC SHOP!**\n\n"
+                "⚡ Быстрая покупка UC через CryptoBot\n\n"
+                "🟢 Мы работаем 24/7\n\n"
+                "👇 Выберите действие в меню ниже:",
+        reply_markup=main_menu(),
+        parse_mode="Markdown"
     )
 
 # ===== CALLBACK =====
@@ -112,13 +120,17 @@ async def callbacks(call: types.CallbackQuery):
     user_id = call.from_user.id
 
     if call.data == "buy":
-        await call.message.edit_text("💰 Выберите пакет UC:", reply_markup=uc_menu())
+        await call.message.edit_caption(
+            caption="💰 **Выберите количество UC:**\n\n"
+                    "Нажмите на нужный пакет:",
+            reply_markup=uc_menu(),
+            parse_mode="Markdown"
+        )
         await call.answer()
 
     elif call.data.startswith("uc_"):
         price = call.data.split("_")[1]
         
-        # Соответствие цены и количества UC
         if price == "1":
             amount = "60"
         elif price == "4":
@@ -131,11 +143,18 @@ async def callbacks(call: types.CallbackQuery):
             amount = price
         
         user_state[user_id] = {"price": price, "amount": amount}
-        await bot.send_message(user_id, "📩 Введите ваш PUBG ID (только цифры):")
+        await bot.send_message(user_id, "📩 **Введите ваш PUBG ID** (только цифры):", parse_mode="Markdown")
         await call.answer()
 
     elif call.data == "back":
-        await call.message.edit_text("👋 Добро пожаловать в UC SHOP\n\nВыберите действие:", reply_markup=main_menu())
+        await call.message.edit_caption(
+            caption="👋 **Добро пожаловать в UC SHOP!**\n\n"
+                    "⚡ Быстрая покупка UC через CryptoBot\n\n"
+                    "🟢 Мы работаем 24/7\n\n"
+                    "👇 Выберите действие в меню ниже:",
+            reply_markup=main_menu(),
+            parse_mode="Markdown"
+        )
         await call.answer()
 
     elif call.data == "orders":
@@ -143,7 +162,7 @@ async def callbacks(call: types.CallbackQuery):
         data = cursor.fetchall()
 
         if not data:
-            await call.message.answer("📭 У вас пока нет заказов.")
+            await call.message.answer("📭 **У вас пока нет заказов.**", parse_mode="Markdown")
         else:
             text = "📦 **Ваши заказы:**\n\n"
             for o in data:
@@ -158,12 +177,12 @@ async def callbacks(call: types.CallbackQuery):
         if status == "paid":
             cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE invoice_id=?", (invoice_id,))
             conn.commit()
-            await call.message.answer("✅ Оплата найдена! Товар будет выдан в ближайшее время.")
+            await call.message.answer("✅ **Оплата найдена!**\n\nТовар будет выдан в ближайшее время.", parse_mode="Markdown")
             await bot.send_message(ADMIN_ID, f"💰 **НОВЫЙ ОПЛАЧЕННЫЙ ЗАКАЗ!**\nИнвойс: {invoice_id}")
         elif status == "expired":
-            await call.message.answer("❌ Срок оплаты истёк. Создайте новый заказ.")
+            await call.message.answer("❌ **Срок оплаты истёк.**\n\nСоздайте новый заказ.", parse_mode="Markdown")
         else:
-            await call.message.answer("❌ Оплата пока не найдена. Попробуйте позже или нажмите 'Оплатить'.")
+            await call.message.answer("❌ **Оплата пока не найдена.**\n\nПопробуйте позже или нажмите 'Оплатить'.", parse_mode="Markdown")
         await call.answer()
 
 # ===== ВВОД PUBG ID =====
@@ -175,7 +194,7 @@ async def get_id(msg: types.Message):
 
     pubg_id = msg.text.strip()
     if not pubg_id.isdigit():
-        await msg.answer("❌ PUBG ID должен состоять только из цифр. Попробуйте еще раз.")
+        await msg.answer("❌ **PUBG ID должен состоять только из цифр.**\n\nПопробуйте еще раз:", parse_mode="Markdown")
         return
 
     data = user_state.pop(user_id)
@@ -184,7 +203,7 @@ async def get_id(msg: types.Message):
 
     pay_url, invoice_id = create_invoice(price)
     if not pay_url:
-        await msg.answer("❌ Ошибка создания платежа. Попробуйте позже.")
+        await msg.answer("❌ **Ошибка создания платежа.**\n\nПопробуйте позже.", parse_mode="Markdown")
         return
 
     cursor.execute("""
@@ -204,10 +223,10 @@ async def get_id(msg: types.Message):
 
     await msg.answer(
         f"✅ **Заказ создан!**\n\n"
-        f"🆔 PUBG ID: {pubg_id}\n"
-        f"📦 UC: {amount} UC\n"
-        f"💰 Сумма: {price}$ USDT\n\n"
-        f"👇 Нажмите на кнопку для оплаты:",
+        f"🆔 **PUBG ID:** {pubg_id}\n"
+        f"📦 **UC:** {amount} UC\n"
+        f"💰 **Сумма:** {price}$ USDT\n\n"
+        f"👇 **Нажмите на кнопку для оплаты:**",
         reply_markup=pay_menu(pay_url, invoice_id),
         parse_mode="Markdown"
     )
@@ -225,7 +244,7 @@ async def auto_check():
                 if status == "paid":
                     cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE id=?", (order_id,))
                     conn.commit()
-                    await bot.send_message(user_id, "✅ Ваш заказ успешно оплачен! Товар будет выдан в ближайшее время.")
+                    await bot.send_message(user_id, "✅ **Ваш заказ успешно оплачен!**\n\nТовар будет выдан в ближайшее время.", parse_mode="Markdown")
                     await bot.send_message(ADMIN_ID, f"💰 **АВТОПРОВЕРКА:** Заказ #{order_id} оплачен!")
                 elif status == "expired":
                     cursor.execute("UPDATE orders SET status='❌ Просрочен' WHERE id=?", (order_id,))
