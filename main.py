@@ -7,8 +7,8 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-API_TOKEN = os.environ.get("BOT_TOKEN")
-CRYPTO_TOKEN = os.environ.get("CRYPTO_TOKEN")
+API_TOKEN = os.environ.get("8481595569:AAFn1ehN91oFEWrz6PXEJteAuBusUj5ugRk")
+CRYPTO_TOKEN = os.environ.get("580735:AAnmT6FQX54ojRfRB9Yt4D9YQeHa8wsVNJa")
 ADMIN_ID = 8504217011
 
 bot = Bot(token=API_TOKEN)
