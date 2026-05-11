@@ -177,14 +177,14 @@ def catalog_keyboard(category):
     keyboard = InlineKeyboardMarkup(row_width=1)
     for pid, p in PRODUCTS.items():
         if p.get("category") == category and p.get("active", True):
-            keyboard.add(InlineKeyboardButton(f"{p['name']} — {p['price']}₽", callback_data=f"view_{pid}"))
+            keyboard.add(InlineKeyboardButton(f"{p['name']} — {p['price']}₽", callback_data=f"view_{pid}_{category}"))
     keyboard.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_menu"))
     return keyboard
 
-def product_keyboard(pid):
+def product_keyboard(pid, category):
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(InlineKeyboardButton("➕ В КОРЗИНУ", callback_data=f"add_{pid}"))
-    keyboard.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_menu"))
+    keyboard.add(InlineKeyboardButton("🔙 НАЗАД", callback_data=f"back_to_cat_{category}"))
     return keyboard
 
 def cart_keyboard(user_id, promo_discount=0):
@@ -258,9 +258,7 @@ last_message_id = {}
 current_promo = {}
 admin_state = {}
 
-# ===== ФУНКЦИЯ УДАЛЕНИЯ СТАРЫХ СООБЩЕНИЙ (БЕЗ ДУБЛЕЙ) =====
 async def update_message(chat_id, user_id, text, reply_markup=None, parse_mode=None):
-    """Удаляет старое сообщение и отправляет новое"""
     msg_id = last_message_id.get(user_id)
     try:
         if msg_id:
@@ -294,6 +292,7 @@ async def handle(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
     await bot.answer_callback_query(callback.id)
 
+    # Категории
     if data == "cat_uc":
         await update_message(chat_id, user_id, "💰 **ВЫБЕРИТЕ UC:**", catalog_keyboard("uc"), "Markdown")
     elif data == "cat_pp":
@@ -302,20 +301,28 @@ async def handle(callback: types.CallbackQuery):
         await update_message(chat_id, user_id, "📦 **ВЫБЕРИТЕ ПОДПИСКУ:**", catalog_keyboard("sub"), "Markdown")
     elif data == "cat_vpn":
         await update_message(chat_id, user_id, "🌐 **ИНТЕРНЕТ БЕЗ ОГРАНИЧЕНИЙ:**", catalog_keyboard("vpn"), "Markdown")
+    
+    # Просмотр товара
     elif data.startswith("view_"):
-        pid = data.replace("view_", "")
+        parts = data.split("_")
+        pid = parts[1]
+        category = parts[2] if len(parts) > 2 else "uc"
         p = PRODUCTS.get(pid)
         if p and p.get("active", True):
             auto_text = "✅ Выдаётся автоматически" if p.get("auto", False) else "👤 Выдача вручную"
-            await update_message(chat_id, user_id, f"📦 **{p['name']}**\n💰 Цена: {p['price']}₽\n\n{auto_text}", product_keyboard(pid), "Markdown")
+            await update_message(chat_id, user_id, f"📦 **{p['name']}**\n💰 Цена: {p['price']}₽\n\n{auto_text}", product_keyboard(pid, category), "Markdown")
         else:
             await update_message(chat_id, user_id, "❌ Товар не найден", main_menu())
+    
+    # Добавление в корзину
     elif data.startswith("add_"):
         pid = data.replace("add_", "")
         p = PRODUCTS.get(pid)
         if p:
             add_to_cart(user_id, pid, p["name"], p["price"])
             await update_message(chat_id, user_id, f"✅ **{p['name']}** добавлен в корзину!", main_menu())
+    
+    # Корзина
     elif data == "show_cart":
         cart = get_cart(user_id)
         if not cart:
@@ -332,9 +339,13 @@ async def handle(callback: types.CallbackQuery):
                 text += f"\n🎟️ **ПРОМОКОД: -{discount}%**"
                 text += f"\n🔄 **К ОПЛАТЕ: {final_total}₽**"
             await update_message(chat_id, user_id, text, cart_keyboard(user_id, discount), "Markdown")
+    
+    # Ввод промокода
     elif data == "enter_promo":
         admin_state[user_id] = "waiting_promo"
         await update_message(chat_id, user_id, "🎟️ **ВВЕДИТЕ ПРОМОКОД:**\n\nОтправьте код текстом.", None, "Markdown")
+    
+    # Удаление из корзины
     elif data.startswith("remove_"):
         pid = data.replace("remove_", "")
         remove_from_cart(user_id, pid)
@@ -353,10 +364,14 @@ async def handle(callback: types.CallbackQuery):
                 text += f"\n🎟️ **ПРОМОКОД: -{discount}%**"
                 text += f"\n🔄 **К ОПЛАТЕ: {final_total}₽**"
             await update_message(chat_id, user_id, text, cart_keyboard(user_id, discount), "Markdown")
+    
+    # Очистка корзины
     elif data == "clear_cart":
         clear_cart(user_id)
         current_promo.pop(user_id, None)
         await update_message(chat_id, user_id, "🗑 **КОРЗИНА ОЧИЩЕНА**", main_menu(), "Markdown")
+    
+    # Оформление заказа
     elif data == "checkout":
         cart = get_cart(user_id)
         if cart:
@@ -383,6 +398,8 @@ async def handle(callback: types.CallbackQuery):
             await bot.send_message(ADMIN_ID, f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}!**\n{user_link}\n💰 {final_total}₽\n📉 Скидка: {discount}%\n\n{items_text}", parse_mode="Markdown")
             clear_cart(user_id)
             current_promo.pop(user_id, None)
+    
+    # Я оплатил
     elif data.startswith("paid_"):
         order_id = int(data.replace("paid_", ""))
         order = next((o for o in orders if o["id"] == order_id), None)
@@ -402,6 +419,8 @@ async def handle(callback: types.CallbackQuery):
                         await bot.send_message(order["user_id"], f"✅ **ЗАКАЗ #{order_id} ВЫПОЛНЕН!**\n\n🎁 **Ваши товары:**\n{codes_text}", parse_mode="Markdown")
             else:
                 await update_message(chat_id, user_id, f"⚠️ Заказ #{order_id} уже обработан.", main_menu(), "Markdown")
+    
+    # Отзывы
     elif data == "show_reviews":
         if not reviews:
             await update_message(chat_id, user_id, "⭐ **ОТЗЫВЫ**\n\nПока нет отзывов. Будьте первым!", reviews_keyboard(), "Markdown")
@@ -414,23 +433,44 @@ async def handle(callback: types.CallbackQuery):
             keyboard.add(InlineKeyboardButton("📝 ОСТАВИТЬ ОТЗЫВ", callback_data="leave_review"))
             keyboard.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_menu"))
             await update_message(chat_id, user_id, text, keyboard, "Markdown")
+    
     elif data in ["review_1", "review_2", "review_3", "review_4", "review_5"]:
         rating = int(data.replace("review_", ""))
         admin_state[user_id] = f"wait_review_text_{rating}"
         await update_message(chat_id, user_id, f"⭐ Вы выбрали {rating} звёзд.\n\nНапишите текст отзыва:", None)
+    
     elif data == "leave_review":
         await update_message(chat_id, user_id, "⭐ **ОЦЕНИТЕ НАШ МАГАЗИН:**", reviews_keyboard(), "Markdown")
+    
+    # Поддержка
     elif data == "support":
         support_requests[user_id] = True
         await update_message(chat_id, user_id, "💬 **ЧАТ ПОДДЕРЖКИ**\n\nНапишите ваше сообщение. Админ ответит.", support_keyboard(user_id), "Markdown")
+    
     elif data == "close_support":
         support_requests.pop(user_id, None)
         await update_message(chat_id, user_id, "🔚 Чат поддержки закрыт.", main_menu())
+    
+    # Навигация
     elif data == "back_to_menu":
         text = "👋 Добро пожаловать в магазин Akuma UC BOT!\n\nИспользуйте меню ниже для навигации:"
         await update_message(chat_id, user_id, text, main_menu())
+    
+    elif data.startswith("back_to_cat_"):
+        category = data.replace("back_to_cat_", "")
+        if category == "uc":
+            await update_message(chat_id, user_id, "💰 **ВЫБЕРИТЕ UC:**", catalog_keyboard("uc"), "Markdown")
+        elif category == "pp":
+            await update_message(chat_id, user_id, "🎉 **ВЫБЕРИТЕ ПП:**", catalog_keyboard("pp"), "Markdown")
+        elif category == "sub":
+            await update_message(chat_id, user_id, "📦 **ВЫБЕРИТЕ ПОДПИСКУ:**", catalog_keyboard("sub"), "Markdown")
+        elif category == "vpn":
+            await update_message(chat_id, user_id, "🌐 **ИНТЕРНЕТ БЕЗ ОГРАНИЧЕНИЙ:**", catalog_keyboard("vpn"), "Markdown")
+    
     elif data in ["other_games", "tg_products"]:
         await update_message(chat_id, user_id, "🚧 **РАЗДЕЛ В РАЗРАБОТКЕ**", main_menu(), "Markdown")
+
+    # Админка
     elif data == "admin_stats" and is_admin(user_id):
         total_orders = len(orders)
         completed = len([o for o in orders if o["status"] == "completed"])
@@ -439,6 +479,7 @@ async def handle(callback: types.CallbackQuery):
         total_codes = sum(len(c) for c in codes.values())
         text = f"📊 **СТАТИСТИКА**\n📦 Всего заказов: {total_orders}\n✅ Выполнено: {completed}\n⏳ Оплачено: {paid}\n💰 Выручка: {revenue}₽\n⭐ Отзывов: {len(reviews)}\n🔑 Кодов: {total_codes}\n🎟️ Промокодов: {len(promocodes)}"
         await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
+    
     elif data == "admin_reviews" and is_admin(user_id):
         if not reviews:
             await update_message(chat_id, user_id, "⭐ Отзывов пока нет", admin_menu(), "Markdown")
@@ -450,6 +491,7 @@ async def handle(callback: types.CallbackQuery):
             keyboard.add(InlineKeyboardButton("🗑 Удалить последний", callback_data="admin_delete_last_review"))
             keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
             await update_message(chat_id, user_id, text, keyboard, "Markdown")
+    
     elif data == "admin_delete_last_review" and is_admin(user_id):
         if reviews:
             deleted = reviews.pop()
@@ -457,6 +499,7 @@ async def handle(callback: types.CallbackQuery):
             await update_message(chat_id, user_id, f"✅ Удалён отзыв от {deleted['user_name']}", admin_menu(), "Markdown")
         else:
             await update_message(chat_id, user_id, "❌ Нет отзывов", admin_menu(), "Markdown")
+    
     elif data == "admin_support_chats" and is_admin(user_id):
         if not support_requests:
             await update_message(chat_id, user_id, "💬 Нет активных чатов", admin_menu(), "Markdown")
@@ -465,8 +508,10 @@ async def handle(callback: types.CallbackQuery):
             for uid in support_requests:
                 text += f"• {uid}\n"
             await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
+    
     elif data == "admin_products" and is_admin(user_id):
         await update_message(chat_id, user_id, "📦 Управление товарами:", admin_products_menu(), "Markdown")
+    
     elif data == "admin_orders" and is_admin(user_id):
         if not orders:
             await update_message(chat_id, user_id, "📭 Нет заказов", admin_menu(), "Markdown")
@@ -476,6 +521,7 @@ async def handle(callback: types.CallbackQuery):
                 emoji = "🆕" if o["status"] == "pending" else "💰" if o["status"] == "paid" else "✅"
                 text += f"{emoji} #{o['id']} | {o['total']}₽ | {o['status']}\n"
             await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
+    
     elif data == "admin_pending" and is_admin(user_id):
         paid_orders = [o for o in orders if o["status"] == "paid"]
         if not paid_orders:
@@ -485,6 +531,7 @@ async def handle(callback: types.CallbackQuery):
             for o in paid_orders:
                 text += f"#{o['id']} | {o['total']}₽ | {o['user_link']}\n"
             await update_message(chat_id, user_id, text, admin_menu(), "Markdown")
+    
     elif data == "admin_promocodes" and is_admin(user_id):
         if not promocodes:
             await update_message(chat_id, user_id, "🎟️ Промокодов пока нет", admin_menu(), "Markdown")
@@ -495,9 +542,11 @@ async def handle(callback: types.CallbackQuery):
             keyboard.add(InlineKeyboardButton("➕ Добавить", callback_data="admin_add_promo"))
             keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
             await update_message(chat_id, user_id, "🎟️ Управление промокодами:", keyboard, "Markdown")
+    
     elif data == "admin_add_promo" and is_admin(user_id):
         admin_state[user_id] = "wait_promo_code"
         await update_message(chat_id, user_id, "🎟️ Введите код промокода:", None, "Markdown")
+    
     elif data.startswith("admin_edit_promo_") and is_admin(user_id):
         code = data.replace("admin_edit_promo_", "")
         promo = promocodes.get(code)
@@ -507,12 +556,14 @@ async def handle(callback: types.CallbackQuery):
             keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_promocodes"))
             text = f"🎟️ **{code}**\nСкидка: {promo['discount']}%\nИспользован: {promo.get('uses', 0)}/{promo.get('max_uses', '∞')}"
             await update_message(chat_id, user_id, text, keyboard, "Markdown")
+    
     elif data.startswith("admin_delete_promo_") and is_admin(user_id):
         code = data.replace("admin_delete_promo_", "")
         if code in promocodes:
             del promocodes[code]
             save_promocodes()
             await update_message(chat_id, user_id, f"✅ Промокод {code} удалён", admin_menu(), "Markdown")
+    
     elif data == "admin_codes" and is_admin(user_id):
         keyboard = InlineKeyboardMarkup(row_width=1)
         for pid, p in PRODUCTS.items():
@@ -522,6 +573,7 @@ async def handle(callback: types.CallbackQuery):
         keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
         text = "🔑 Управление кодами:" if keyboard.keyboard else "🔑 Нет товаров с автовыдачей"
         await update_message(chat_id, user_id, text, keyboard, "Markdown")
+    
     elif data.startswith("admin_manage_codes_") and is_admin(user_id):
         pid = data.replace("admin_manage_codes_", "")
         p = PRODUCTS.get(pid)
@@ -532,10 +584,12 @@ async def handle(callback: types.CallbackQuery):
             keyboard.add(InlineKeyboardButton("➕ Добавить", callback_data=f"admin_add_codes_{pid}"))
             keyboard.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_codes"))
             await update_message(chat_id, user_id, text, keyboard, "Markdown")
+    
     elif data.startswith("admin_add_codes_") and is_admin(user_id):
         pid = data.replace("admin_add_codes_", "")
         admin_state[user_id] = f"wait_codes_{pid}"
         await update_message(chat_id, user_id, "🔑 Введите коды (каждый с новой строки):\n\nПример:\nCODE123\nCODE456", None, "Markdown")
+    
     elif data.startswith("complete_order_") and is_admin(user_id):
         order_id = int(data.replace("complete_order_", ""))
         order = next((o for o in orders if o["id"] == order_id), None)
@@ -544,6 +598,7 @@ async def handle(callback: types.CallbackQuery):
             save_orders()
             await update_message(chat_id, user_id, f"✅ Заказ #{order_id} выполнен", admin_menu(), "Markdown")
             await bot.send_message(order["user_id"], f"✅ **ЗАКАЗ #{order_id} ВЫПОЛНЕН!**\nСпасибо за покупку!", parse_mode="Markdown")
+    
     elif data.startswith("reject_order_") and is_admin(user_id):
         order_id = int(data.replace("reject_order_", ""))
         order = next((o for o in orders if o["id"] == order_id), None)
@@ -552,14 +607,18 @@ async def handle(callback: types.CallbackQuery):
             orders.remove(order)
             save_orders()
             await update_message(chat_id, user_id, f"❌ Заказ #{order_id} отклонён", admin_menu(), "Markdown")
+    
     elif data.startswith("msg_user_") and is_admin(user_id):
         order_id = int(data.replace("msg_user_", ""))
         admin_state[user_id] = f"msg_{order_id}"
         await update_message(chat_id, user_id, f"💬 Напишите сообщение для заказа #{order_id}:", None)
+    
     elif data == "admin_exit" and is_admin(user_id):
         await update_message(chat_id, user_id, "🔚 Выход из админ-панели", main_menu())
+    
     elif data == "admin_back" and is_admin(user_id):
         await update_message(chat_id, user_id, "🔧 Админ-панель", admin_menu(), "Markdown")
+    
     elif data.startswith("admin_edit_") and is_admin(user_id):
         pid = data.replace("admin_edit_", "")
         p = PRODUCTS.get(pid)
@@ -572,28 +631,33 @@ async def handle(callback: types.CallbackQuery):
             kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_products"))
             auto = "✅" if p.get("auto", False) else "❌"
             await update_message(chat_id, user_id, f"📦 **{p['name']}**\n💰 {p['price']}₽\n🎁 Автовыдача: {auto}", kb, "Markdown")
+    
     elif data.startswith("admin_toggle_") and is_admin(user_id):
         pid = data.replace("admin_toggle_", "")
         if pid in PRODUCTS:
             PRODUCTS[pid]["active"] = not PRODUCTS[pid]["active"]
             save_products()
             await update_message(chat_id, user_id, "✅ Готово", admin_products_menu(), "Markdown")
+    
     elif data.startswith("admin_auto_") and is_admin(user_id):
         pid = data.replace("admin_auto_", "")
         if pid in PRODUCTS:
             PRODUCTS[pid]["auto"] = not PRODUCTS[pid].get("auto", False)
             save_products()
             await update_message(chat_id, user_id, f"✅ Автовыдача {'включена' if PRODUCTS[pid]['auto'] else 'выключена'}", admin_products_menu(), "Markdown")
+    
     elif data.startswith("admin_price_") and is_admin(user_id):
         pid = data.replace("admin_price_", "")
         admin_state[user_id] = f"wait_price_{pid}"
         await update_message(chat_id, user_id, "💰 Введите новую цену:", None)
+    
     elif data.startswith("admin_delete_") and is_admin(user_id):
         pid = data.replace("admin_delete_", "")
         if pid in PRODUCTS:
             del PRODUCTS[pid]
             save_products()
             await update_message(chat_id, user_id, "✅ Удалено", admin_products_menu(), "Markdown")
+    
     elif data == "admin_add" and is_admin(user_id):
         admin_state[user_id] = "wait_product"
         await update_message(chat_id, user_id, "➕ Добавление товара:\n\nФормат: `id|название|цена|категория|auto`\nauto: 1 или 0\n\nПример: `vpn_2|VPN PRO|500|vpn|1`", None, "Markdown")
