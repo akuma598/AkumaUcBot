@@ -3,37 +3,40 @@ import sqlite3
 import requests
 import asyncio
 import os
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
+# ===== ПЕРЕМЕННЫЕ =====
 API_TOKEN = os.environ.get("BOT_TOKEN")
 CRYPTO_TOKEN = os.environ.get("CRYPTO_TOKEN")
-ADMIN_ID = 8504217011
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "8504217011"))
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
-
 logging.basicConfig(level=logging.INFO)
 
-# ===== БАЗА =====
-conn = sqlite3.connect("shop.db")
+# ===== БАЗА ДАННЫХ =====
+conn = sqlite3.connect("shop.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders (
-id INTEGER PRIMARY KEY,
-user_id INTEGER,
-username TEXT,
-uc TEXT,
-pubg_id TEXT,
-invoice_id TEXT,
-status TEXT
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    username TEXT,
+    uc_amount TEXT,
+    pubg_id TEXT,
+    price TEXT,
+    invoice_id TEXT,
+    status TEXT,
+    created_at TEXT
 )
 """)
 conn.commit()
 
-# ===== UI =====
+# ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -55,30 +58,47 @@ def uc_menu():
     )
     return kb
 
-def pay_menu(url):
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("💳 Оплатить", url=url))
-    kb.add(InlineKeyboardButton("🔄 Проверить оплату", callback_data="check"))
+def pay_menu(url, invoice_id):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("💳 Оплатить", url=url),
+        InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_{invoice_id}")
+    )
     return kb
 
-# ===== CRYPTO =====
+# ===== ФУНКЦИИ CRYPTOBOT =====
 def create_invoice(amount):
     url = "https://pay.crypt.bot/api/createInvoice"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-    data = {"asset": "USDT", "amount": amount}
-    r = requests.post(url, headers=headers, json=data).json()
-    return r["result"]["pay_url"], r["result"]["invoice_id"]
+    data = {"asset": "USDT", "amount": str(amount)}
+    try:
+        r = requests.post(url, headers=headers, json=data).json()
+        if r.get("ok"):
+            return r["result"]["pay_url"], str(r["result"]["invoice_id"])
+        else:
+            logging.error(f"CryptoBot error: {r}")
+            return None, None
+    except Exception as e:
+        logging.error(f"Request failed: {e}")
+        return None, None
 
 def check_invoice(invoice_id):
     url = "https://pay.crypt.bot/api/getInvoices"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-    r = requests.get(url, headers=headers).json()
+    params = {"invoice_ids": invoice_id}
+    try:
+        r = requests.get(url, headers=headers, params=params).json()
+        if r.get("ok") and r["result"]["items"]:
+            return r["result"]["items"][0]["status"]
+        return None
+    except Exception as e:
+        logging.error(f"Check invoice failed: {e}")
+        return None
 
-    for i in r["result"]["items"]:
-        if str(i["invoice_id"]) == str(invoice_id):
-            return i["status"]
+# ===== ХРАНИЛИЩЕ =====
+user_state = {}
 
-# ===== СТАРТ =====
+# ===== КОМАНДА START =====
 @dp.message_handler(commands=['start'])
 async def start(msg: types.Message):
     await msg.answer(
@@ -86,109 +106,129 @@ async def start(msg: types.Message):
         reply_markup=main_menu()
     )
 
-# ===== СОСТОЯНИЕ =====
-user_state = {}
-
 # ===== CALLBACK =====
 @dp.callback_query_handler(lambda c: True)
 async def callbacks(call: types.CallbackQuery):
+    user_id = call.from_user.id
 
     if call.data == "buy":
         await call.message.edit_text("💰 Выберите пакет:", reply_markup=uc_menu())
+        await call.answer()
 
     elif call.data.startswith("uc_"):
         price = call.data.split("_")[1]
-        user_state[call.from_user.id] = {"price": price}
-        await bot.send_message(call.from_user.id, "📩 Введите PUBG ID")
+        
+        if price == "1":
+            amount = "60"
+        elif price == "4":
+            amount = "325"
+        elif price == "8":
+            amount = "660"
+        elif price == "20":
+            amount = "1800"
+        else:
+            amount = price
+        
+        user_state[user_id] = {"price": price, "amount": amount}
+        await bot.send_message(user_id, "📩 Введите PUBG ID")
+        await call.answer()
 
     elif call.data == "back":
         await call.message.edit_text("🏠 Главное меню", reply_markup=main_menu())
+        await call.answer()
 
     elif call.data == "orders":
-        cursor.execute("SELECT * FROM orders WHERE user_id=?", (call.from_user.id,))
+        cursor.execute("SELECT id, uc_amount, price, status FROM orders WHERE user_id=? ORDER BY id DESC", (user_id,))
         data = cursor.fetchall()
 
         if not data:
             await call.message.answer("❌ Заказов нет")
-            return
+        else:
+            text = "📦 **Ваши заказы:**\n\n"
+            for o in data:
+                text += f"🆔 #{o[0]} | {o[1]} UC | {o[2]}$ | {o[3]}\n"
+            await call.message.answer(text, parse_mode="Markdown")
+        await call.answer()
 
-        text = "📦 Ваши заказы:\n\n"
-        for o in data:
-            text += f"#{o[0]} | {o[3]} UC | {o[6]}\n"
-
-        await call.message.answer(text)
-
-    elif call.data == "check":
-        cursor.execute(
-            "SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 1",
-            (call.from_user.id,)
-        )
-        o = cursor.fetchone()
-
-        if not o:
-            return
-
-        status = check_invoice(o[5])
+    elif call.data.startswith("check_"):
+        invoice_id = call.data.split("_")[1]
+        status = check_invoice(invoice_id)
 
         if status == "paid":
-            cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE id=?", (o[0],))
+            cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE invoice_id=?", (invoice_id,))
             conn.commit()
-
-            await call.message.answer("✅ Оплата найдена!")
-
-            await bot.send_message(
-                ADMIN_ID,
-                f"💸 Новый оплаченный заказ\n\nID: {o[0]}\nPUBG: {o[4]}"
-            )
-
+            await call.message.answer("✅ Оплата найдена! Товар будет выдан.")
+            await bot.send_message(ADMIN_ID, f"💰 Новый оплаченный заказ!\nИнвойс: {invoice_id}")
+        elif status == "expired":
+            await call.message.answer("❌ Срок оплаты истёк.")
         else:
-            await call.message.answer("❌ Оплата не найдена")
+            await call.message.answer("❌ Оплата не найдена. Попробуйте позже.")
+        await call.answer()
 
-# ===== ВВОД ID =====
+# ===== ВВОД PUBG ID =====
 @dp.message_handler()
 async def get_id(msg: types.Message):
-    if msg.from_user.id in user_state:
-        price = user_state[msg.from_user.id]["price"]
+    user_id = msg.from_user.id
+    if user_id not in user_state:
+        return
 
-        pay_url, invoice_id = create_invoice(price)
+    pubg_id = msg.text.strip()
+    if not pubg_id.isdigit():
+        await msg.answer("❌ PUBG ID должен состоять только из цифр. Попробуйте еще раз.")
+        return
 
-        cursor.execute(
-            "INSERT INTO orders VALUES (NULL, ?, ?, ?, ?, ?, ?)",
-            (
-                msg.from_user.id,
-                msg.from_user.username,
-                price,
-                msg.text,
-                invoice_id,
-                "💳 Ожидание оплаты"
-            )
-        )
-        conn.commit()
+    data = user_state.pop(user_id)
+    price = data["price"]
+    amount = data["amount"]
 
-        await msg.answer(
-            f"💳 Оплата: {price}$\n🆔 ID: {msg.text}",
-            reply_markup=pay_menu(pay_url)
-        )
+    pay_url, invoice_id = create_invoice(price)
+    if not pay_url:
+        await msg.answer("❌ Ошибка создания платежа. Попробуйте позже.")
+        return
 
-        del user_state[msg.from_user.id]
+    cursor.execute("""
+        INSERT INTO orders (user_id, username, uc_amount, pubg_id, price, invoice_id, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id,
+        msg.from_user.username or "Аноним",
+        amount,
+        pubg_id,
+        price,
+        invoice_id,
+        "💳 Ожидание оплаты",
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    conn.commit()
 
-# ===== АВТО ПРОВЕРКА =====
+    await msg.answer(
+        f"✅ Заказ создан!\n\n🆔 PUBG ID: {pubg_id}\n📦 UC: {amount} UC\n💰 Сумма: {price}$ USDT",
+        reply_markup=pay_menu(pay_url, invoice_id)
+    )
+
+# ===== АВТОПРОВЕРКА =====
 async def auto_check():
     while True:
-        cursor.execute("SELECT * FROM orders WHERE status='💳 Ожидание оплаты'")
-        orders = cursor.fetchall()
+        try:
+            cursor.execute("SELECT id, invoice_id, user_id FROM orders WHERE status='💳 Ожидание оплаты'")
+            orders = cursor.fetchall()
 
-        for o in orders:
-            status = check_invoice(o[5])
-
-            if status == "paid":
-                cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE id=?", (o[0],))
-                conn.commit()
-
-                await bot.send_message(o[1], "✅ Оплата прошла!")
-                await bot.send_message(ADMIN_ID, f"💰 Оплата #{o[0]}")
+            for o in orders:
+                status = check_invoice(o[1])
+                if status == "paid":
+                    cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE id=?", (o[0],))
+                    conn.commit()
+                    await bot.send_message(o[2], "✅ Ваш заказ оплачен! Товар будет выдан.")
+                    await bot.send_message(ADMIN_ID, f"💰 Автооплата: заказ #{o[0]}")
+        except Exception as e:
+            logging.error(f"Auto check error: {e}")
 
         await asyncio.sleep(15)
+
+# ===== ФАЙЛ requirements.txt =====
+# aiogram==2.25.1
+# requests
+# 
 
 # ===== ЗАПУСК =====
 if __name__ == "__main__":
