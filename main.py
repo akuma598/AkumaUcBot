@@ -62,18 +62,18 @@ def main_menu():
 def uc_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("📦 60 UC — 63₽", callback_data="select_60_63"),
-        InlineKeyboardButton("📦 120 UC — 126₽", callback_data="select_120_126"),
-        InlineKeyboardButton("📦 180 UC — 189₽", callback_data="select_180_189"),
-        InlineKeyboardButton("📦 240 UC — 252₽", callback_data="select_240_252"),
-        InlineKeyboardButton("📦 325 UC — 341₽", callback_data="select_325_341"),
-        InlineKeyboardButton("📦 385 UC — 404₽", callback_data="select_385_404"),
-        InlineKeyboardButton("📦 445 UC — 467₽", callback_data="select_445_467"),
-        InlineKeyboardButton("📦 660 UC — 693₽", callback_data="select_660_693"),
-        InlineKeyboardButton("📦 720 UC — 756₽", callback_data="select_720_756"),
-        InlineKeyboardButton("📦 985 UC — 1034₽", callback_data="select_985_1034"),
-        InlineKeyboardButton("📦 1320 UC — 1386₽", callback_data="select_1320_1386"),
-        InlineKeyboardButton("📦 1800 UC — 1890₽", callback_data="select_1800_1890"),
+        InlineKeyboardButton("📦 60 UC — 78₽", callback_data="select_60_78"),
+        InlineKeyboardButton("📦 120 UC — 141₽", callback_data="select_120_141"),
+        InlineKeyboardButton("📦 180 UC — 204₽", callback_data="select_180_204"),
+        InlineKeyboardButton("📦 240 UC — 267₽", callback_data="select_240_267"),
+        InlineKeyboardButton("📦 325 UC — 356₽", callback_data="select_325_356"),
+        InlineKeyboardButton("📦 385 UC — 419₽", callback_data="select_385_419"),
+        InlineKeyboardButton("📦 445 UC — 482₽", callback_data="select_445_482"),
+        InlineKeyboardButton("📦 660 UC — 708₽", callback_data="select_660_708"),
+        InlineKeyboardButton("📦 720 UC — 771₽", callback_data="select_720_771"),
+        InlineKeyboardButton("📦 985 UC — 1049₽", callback_data="select_985_1049"),
+        InlineKeyboardButton("📦 1320 UC — 1401₽", callback_data="select_1320_1401"),
+        InlineKeyboardButton("📦 1800 UC — 1905₽", callback_data="select_1800_1905"),
         InlineKeyboardButton("⬅️ Назад", callback_data="back")
     )
     return kb
@@ -149,12 +149,13 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== ВЫБОР ТОВАРА =====
+# ===== ВЫБОР ТОВАРА (меняется только текст под картинкой) =====
 @dp.callback_query_handler(lambda c: c.data == "buy_uc")
 async def show_uc(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
+    # Меняем только текст под картинкой, сама картинка остаётся
     await callback.message.edit_caption(
         caption="💰 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC:**\n\nОплата рублями через Telegram Stars.",
         reply_markup=uc_menu(),
@@ -164,7 +165,7 @@ async def show_uc(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "back")
 async def back(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\nЗдесь вы можете быстро и удобно купить UC.\n\n👇 Используйте меню ниже:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
@@ -172,7 +173,7 @@ async def back(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== СОЗДАНИЕ ЗАКАЗА И ПОДТВЕРЖДЕНИЕ =====
+# ===== СОЗДАНИЕ ЗАКАЗА =====
 @dp.callback_query_handler(lambda c: c.data.startswith("select_"))
 async def create_order(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
@@ -426,7 +427,7 @@ async def admin_back(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "admin_exit")
 async def admin_exit(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\nЗдесь вы можете быстро и удобно купить UC.\n\n👇 Используйте меню ниже:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
