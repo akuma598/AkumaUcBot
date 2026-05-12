@@ -133,10 +133,10 @@ def payment_method_keyboard(product_id, amount, price_rub, price_stars, price_us
     kb.add(InlineKeyboardButton("❌ Отмена", callback_data="back"))
     return kb
 
-def stars_pay_menu(order_id, product_name, price_stars, price_rub):
+def stars_pay_menu(order_id):
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
-        InlineKeyboardButton("⭐ Оплатить Stars", callback_data=f"stars_pay_{order_id}_{product_name}_{price_stars}_{price_rub}"),
+        InlineKeyboardButton("⭐ Оплатить Stars", callback_data=f"stars_pay_{order_id}"),
         InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_stars_{order_id}"),
         InlineKeyboardButton("🔙 Назад", callback_data="back")
     )
@@ -168,7 +168,7 @@ def orders_keyboard(orders_list, page=0):
     start = page * 5
     end = start + 5
     for order in orders_list[start:end]:
-        status_emoji = "✅" if order[8] == "✅ Выполнен" else "⏳"
+        status_emoji = "✅" if order[6] == "✅ Выполнен" else "⏳"
         kb.add(InlineKeyboardButton(
             f"{status_emoji} #{order[0]} | {order[1]} | {order[3]}₽",
             callback_data=f"order_{order[0]}"
@@ -317,7 +317,6 @@ async def prepare_stars_payment(callback: types.CallbackQuery):
     
     product_name = product_names.get(product_id, product_id)
     
-    # Сохраняем заказ
     cursor.execute("""
         INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_stars, payment_method, status, category, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -346,30 +345,36 @@ async def prepare_stars_payment(callback: types.CallbackQuery):
     
     await callback.message.edit_caption(
         caption=text,
-        reply_markup=stars_pay_menu(order_id, product_name, price_stars, price_rub),
+        reply_markup=stars_pay_menu(order_id),
         parse_mode="Markdown"
     )
     await callback.answer()
+    
+    await bot.send_message(ADMIN_ID, f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 @{callback.from_user.username or 'Аноним'}\n📦 {product_name}\n💰 {price_rub}₽ ({price_stars} Stars)\n💳 Telegram Stars")
 
 # ===== ЗАПУСК ОПЛАТЫ STARS =====
 @dp.callback_query_handler(lambda c: c.data.startswith("stars_pay_"))
 async def stars_pay(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    order_id = int(parts[2])
-    product_name = parts[3]
-    price_stars = int(parts[4])
-    price_rub = int(parts[5])
+    order_id = int(callback.data.split("_")[2])
     
-    await bot.send_invoice(
-        chat_id=callback.from_user.id,
-        title=f"🛒 Заказ #{order_id}",
-        description=product_name,
-        payload=f"order_{order_id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label=product_name, amount=price_stars)],
-        start_parameter=f"order_{order_id}"
-    )
+    cursor.execute("SELECT product_name, price_stars FROM orders WHERE id=?", (order_id,))
+    order = cursor.fetchone()
+    
+    if order:
+        await bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title=f"🛒 Заказ #{order_id}",
+            description=order[0],
+            payload=f"order_{order_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=order[0], amount=order[1])],
+            start_parameter=f"order_{order_id}"
+        )
+        # Удаляем сообщение с кнопками после оплаты
+        await callback.message.delete()
+    else:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
     await callback.answer()
 
 # ===== ПРОВЕРКА STARS ОПЛАТЫ =====
