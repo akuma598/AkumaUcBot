@@ -203,6 +203,13 @@ async def create_order(callback: types.CallbackQuery):
     conn.commit()
     order_id = cursor.lastrowid
     
+    # УВЕДОМЛЕНИЕ АДМИНУ
+    await bot.send_message(
+        ADMIN_ID,
+        f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 @{callback.from_user.username or 'Аноним'}\n📦 {product_name}\n💰 {price_rub}₽",
+        parse_mode="Markdown"
+    )
+    
     text = (
         f"🛒 **ПОДТВЕРЖДЕНИЕ ЗАКАЗА**\n\n"
         f"📦 Товар: {product_name}\n"
@@ -270,11 +277,7 @@ async def successful_payment(message: types.Message):
         
         await bot.send_message(
             ADMIN_ID,
-            f"💰 **НОВЫЙ ОПЛАЧЕННЫЙ ЗАКАЗ #{order_id}**\n"
-            f"👤 @{message.from_user.username or 'Аноним'}\n"
-            f"📦 {order[0]}\n"
-            f"💰 {order[1]}₽\n"
-            f"⭐ {order[2]} Stars",
+            f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n👤 @{message.from_user.username or 'Аноним'}\n📦 {order[0]}\n💰 {order[1]}₽\n⭐ {order[2]} Stars",
             parse_mode="Markdown"
         )
     else:
