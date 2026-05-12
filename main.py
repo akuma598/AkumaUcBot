@@ -1,6 +1,7 @@
 import os
 import logging
 import sqlite3
+import requests
 import asyncio
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
@@ -8,6 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPri
 from aiogram.utils import executor
 
 API_TOKEN = os.environ.get("BOT_TOKEN")
+CRYPTO_TOKEN = os.environ.get("CRYPTO_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8504217011"))
 
 bot = Bot(token=API_TOKEN)
@@ -26,6 +28,9 @@ CREATE TABLE IF NOT EXISTS orders (
     product_amount TEXT,
     price_rub INTEGER,
     price_stars INTEGER,
+    price_usdt REAL,
+    payment_method TEXT,
+    invoice_id TEXT,
     status TEXT,
     category TEXT,
     created_at TEXT
@@ -41,8 +46,37 @@ conn.commit()
 
 WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
 
+USD_RATE = 90
+
 def rub_to_stars(rub):
     return max(1, round(rub / 1.5))
+
+def rub_to_usdt(rub):
+    return round(rub / USD_RATE, 2)
+
+def create_crypto_invoice(amount_usdt):
+    url = "https://pay.crypt.bot/api/createInvoice"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+    data = {"asset": "USDT", "amount": str(amount_usdt)}
+    try:
+        response = requests.post(url, headers=headers, json=data).json()
+        if response.get("ok"):
+            return response["result"]["pay_url"], str(response["result"]["invoice_id"])
+        return None, None
+    except:
+        return None, None
+
+def check_crypto_invoice(invoice_id):
+    url = "https://pay.crypt.bot/api/getInvoices"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+    params = {"invoice_ids": invoice_id}
+    try:
+        response = requests.get(url, headers=headers, params=params).json()
+        if response.get("ok") and response["result"]["items"]:
+            return response["result"]["items"][0]["status"]
+        return None
+    except:
+        return None
 
 async def is_banned(user_id):
     cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
@@ -90,11 +124,29 @@ def metro_menu():
     )
     return kb
 
-def confirm_keyboard(product_id, product_name, amount, price_rub, price_stars, category):
+def payment_method_keyboard(product_id, amount, price_rub, price_stars, price_usdt, category):
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("✅ ДА, ОПЛАТИТЬ", callback_data=f"pay_{product_id}_{amount}_{price_rub}_{price_stars}_{category}"),
-        InlineKeyboardButton("❌ ОТМЕНА", callback_data="back")
+        InlineKeyboardButton("⭐ Telegram Stars", callback_data=f"pay_stars_{product_id}_{amount}_{price_rub}_{price_stars}_{category}"),
+        InlineKeyboardButton("₿ CryptoBot (USDT)", callback_data=f"pay_crypto_{product_id}_{amount}_{price_rub}_{price_usdt}_{category}")
+    )
+    kb.add(InlineKeyboardButton("❌ Отмена", callback_data="back"))
+    return kb
+
+def confirm_keyboard(product_id, amount, price_rub, price_stars, price_usdt, category):
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ Да, оплатить", callback_data=f"payment_method_{product_id}_{amount}_{price_rub}_{price_stars}_{price_usdt}_{category}"),
+        InlineKeyboardButton("❌ Отмена", callback_data="back")
+    )
+    return kb
+
+def crypto_pay_menu(url, invoice_id):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("💳 Оплатить USDT", url=url),
+        InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_crypto_{invoice_id}"),
+        InlineKeyboardButton("🔙 Назад", callback_data="back")
     )
     return kb
 
@@ -115,7 +167,7 @@ def orders_keyboard(orders_list, page=0):
     start = page * 5
     end = start + 5
     for order in orders_list[start:end]:
-        status_emoji = "✅" if order[6] == "✅ Выполнен" else "⏳"
+        status_emoji = "✅" if order[8] == "✅ Выполнен" else "⏳"
         kb.add(InlineKeyboardButton(
             f"{status_emoji} #{order[0]} | {order[1]} | {order[3]}₽",
             callback_data=f"order_{order[0]}"
@@ -167,7 +219,7 @@ async def show_uc(callback: types.CallbackQuery):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
     await callback.message.edit_caption(
-        caption="💰 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC:**\n\nОплата рублями через Telegram Stars.",
+        caption="💰 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC:**\n\nОплата рублями через Telegram Stars или USDT.",
         reply_markup=uc_menu(),
         parse_mode="Markdown"
     )
@@ -179,7 +231,7 @@ async def show_metro(callback: types.CallbackQuery):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
     await callback.message.edit_caption(
-        caption="🎮 **METRO ROYALE**\n\n💰 Донат на оружие и деньги\n\nОплата рублями через Telegram Stars.",
+        caption="🎮 **METRO ROYALE**\n\n💰 Донат на оружие и деньги\n\nОплата рублями через Telegram Stars или USDT.",
         reply_markup=metro_menu(),
         parse_mode="Markdown"
     )
@@ -206,7 +258,6 @@ async def confirm_order(callback: types.CallbackQuery):
     product_id = parts[1]
     price_rub = int(parts[2])
     
-    # Определяем название товара
     product_names = {
         "60": "60 UC", "120": "120 UC", "180": "180 UC", "240": "240 UC",
         "325": "325 UC", "385": "385 UC", "445": "445 UC", "660": "660 UC",
@@ -221,35 +272,37 @@ async def confirm_order(callback: types.CallbackQuery):
     product_name = product_names.get(product_id, product_id)
     category = "UC" if product_id.isdigit() else "METRO ROYALE"
     price_stars = rub_to_stars(price_rub)
+    price_usdt = rub_to_usdt(price_rub)
     
     text = (
         f"🛒 **ПОДТВЕРЖДЕНИЕ ЗАКАЗА**\n\n"
         f"📦 Товар: {product_name}\n"
         f"💰 Сумма: {price_rub}₽\n"
-        f"⭐ Оплата: {price_stars} Telegram Stars\n\n"
-        f"Вы уверены, что хотите приобрести этот товар?"
+        f"⭐ Telegram Stars: {price_stars}\n"
+        f"₿ USDT: {price_usdt} $\n\n"
+        f"Выберите способ оплаты:"
     )
     
     await callback.message.edit_caption(
         caption=text,
-        reply_markup=confirm_keyboard(product_id, product_name, amount, price_rub, price_stars, category),
+        reply_markup=payment_method_keyboard(product_id, amount, price_rub, price_stars, price_usdt, category),
         parse_mode="Markdown"
     )
     await callback.answer()
 
-# ===== ОПЛАТА =====
-@dp.callback_query_handler(lambda c: c.data.startswith("pay_"))
-async def pay_order(callback: types.CallbackQuery):
+# ===== ВЫБОР СПОСОБА ОПЛАТЫ (Stars) =====
+@dp.callback_query_handler(lambda c: c.data.startswith("pay_stars_"))
+async def pay_with_stars(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
     
     parts = callback.data.split("_")
-    product_id = parts[1]
-    amount = parts[2]
-    price_rub = int(parts[3])
-    price_stars = int(parts[4])
-    category = parts[5]
+    product_id = parts[2]
+    amount = parts[3]
+    price_rub = int(parts[4])
+    price_stars = int(parts[5])
+    category = parts[6]
     
     product_names = {
         "60": "60 UC", "120": "120 UC", "180": "180 UC", "240": "240 UC",
@@ -263,10 +316,9 @@ async def pay_order(callback: types.CallbackQuery):
     
     product_name = product_names.get(product_id, product_id)
     
-    # Сохраняем заказ
     cursor.execute("""
-        INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_stars, status, category, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_stars, payment_method, status, category, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         callback.from_user.id,
         callback.from_user.username or "Аноним",
@@ -274,6 +326,7 @@ async def pay_order(callback: types.CallbackQuery):
         str(amount),
         price_rub,
         price_stars,
+        "Telegram Stars",
         "💳 Ожидание оплаты",
         category,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -281,7 +334,6 @@ async def pay_order(callback: types.CallbackQuery):
     conn.commit()
     order_id = cursor.lastrowid
     
-    # Отправляем счет в Telegram Stars
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=f"🛒 Заказ #{order_id}",
@@ -296,7 +348,94 @@ async def pay_order(callback: types.CallbackQuery):
     await callback.message.delete()
     await callback.answer()
 
-# ===== ПРОВЕРКА ОПЛАТЫ =====
+# ===== ВЫБОР СПОСОБА ОПЛАТЫ (Crypto) =====
+@dp.callback_query_handler(lambda c: c.data.startswith("pay_crypto_"))
+async def pay_with_crypto(callback: types.CallbackQuery):
+    if await is_banned(callback.from_user.id):
+        await callback.answer("❌ Вы забанены", show_alert=True)
+        return
+    
+    parts = callback.data.split("_")
+    product_id = parts[2]
+    amount = parts[3]
+    price_rub = int(parts[4])
+    price_usdt = float(parts[5])
+    category = parts[6]
+    
+    product_names = {
+        "60": "60 UC", "120": "120 UC", "180": "180 UC", "240": "240 UC",
+        "325": "325 UC", "385": "385 UC", "445": "445 UC", "660": "660 UC",
+        "720": "720 UC", "985": "985 UC", "1320": "1320 UC", "1800": "1800 UC",
+        "ak47": "🔫 КАЛАШНИКОВ + 5000$",
+        "m416": "🎯 M416 + 10000$",
+        "elite": "💎 ЭЛИТНЫЙ НАБОР",
+        "vip": "👑 VIP НАБОР"
+    }
+    
+    product_name = product_names.get(product_id, product_id)
+    
+    pay_url, invoice_id = create_crypto_invoice(price_usdt)
+    if not pay_url:
+        await callback.message.answer("❌ Ошибка создания платежа. Попробуйте позже.")
+        return
+    
+    cursor.execute("""
+        INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_usdt, payment_method, invoice_id, status, category, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        callback.from_user.id,
+        callback.from_user.username or "Аноним",
+        product_name,
+        str(amount),
+        price_rub,
+        price_usdt,
+        "CryptoBot (USDT)",
+        invoice_id,
+        "💳 Ожидание оплаты",
+        category,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    conn.commit()
+    order_id = cursor.lastrowid
+    
+    text = (
+        f"✅ **ЗАКАЗ #{order_id} СОЗДАН!**\n\n"
+        f"📦 Товар: {product_name}\n"
+        f"💰 Сумма: {price_rub}₽ ({price_usdt} USDT)\n"
+        f"💳 Способ оплаты: CryptoBot\n\n"
+        f"👇 Нажмите на кнопку для оплаты USDT:"
+    )
+    
+    await callback.message.edit_caption(
+        caption=text,
+        reply_markup=crypto_pay_menu(pay_url, invoice_id),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+    
+    await bot.send_message(ADMIN_ID, f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 @{callback.from_user.username or 'Аноним'}\n📦 {product_name}\n💰 {price_rub}₽ ({price_usdt} USDT)\n💳 CryptoBot")
+
+# ===== ПРОВЕРКА CRYPTO ОПЛАТЫ =====
+@dp.callback_query_handler(lambda c: c.data.startswith("check_crypto_"))
+async def check_crypto_payment(callback: types.CallbackQuery):
+    invoice_id = callback.data.split("_")[2]
+    status = check_crypto_invoice(invoice_id)
+    
+    if status == "paid":
+        cursor.execute("UPDATE orders SET status='✅ Оплачен (ожидает выдачи)' WHERE invoice_id=?", (invoice_id,))
+        conn.commit()
+        await callback.message.edit_caption(
+            caption="✅ Оплата успешно найдена!\n\nТовар будет выдан в ближайшее время.",
+            reply_markup=None
+        )
+        await bot.send_message(ADMIN_ID, f"💰 **ОПЛАЧЕН ЗАКАЗ**\nИнвойс: {invoice_id}")
+    elif status == "expired":
+        await callback.answer("❌ Срок оплаты истёк", show_alert=True)
+    else:
+        await callback.answer("❌ Оплата не найдена. Попробуйте позже.", show_alert=True)
+    await callback.answer()
+
+# ===== ПРОВЕРКА STARS ОПЛАТЫ =====
 @dp.pre_checkout_query_handler(lambda query: True)
 async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
@@ -328,7 +467,8 @@ async def successful_payment(message: types.Message):
             f"👤 @{message.from_user.username or 'Аноним'}\n"
             f"📦 {order[0]}\n"
             f"💰 {order[1]}₽\n"
-            f"⭐ {order[2]} Stars",
+            f"⭐ {order[2]} Stars\n"
+            f"💳 Telegram Stars",
             parse_mode="Markdown"
         )
     else:
@@ -359,17 +499,26 @@ async def admin_stats(callback: types.CallbackQuery):
     cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders")
     total = cursor.fetchone()
     
+    # Статистика по способам оплаты
+    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE payment_method='Telegram Stars' AND (status='✅ Оплачен (ожидает выдачи)' OR status='✅ Выполнен')")
+    stars = cursor.fetchone()
+    
+    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE payment_method='CryptoBot (USDT)' AND (status='✅ Оплачен (ожидает выдачи)' OR status='✅ Выполнен')")
+    crypto = cursor.fetchone()
+    
     text = (f"📊 **СТАТИСТИКА**\n\n"
             f"✅ Выполнено заказов: {completed[0] or 0}\n"
             f"💰 Выручка: {completed[1] or 0}₽\n\n"
             f"📦 Всего заказов: {total[0] or 0}\n"
-            f"💸 Общая сумма: {total[1] or 0}₽")
+            f"💸 Общая сумма: {total[1] or 0}₽\n\n"
+            f"⭐ Telegram Stars: {stars[0] or 0} заказов | {stars[1] or 0}₽\n"
+            f"₿ CryptoBot USDT: {crypto[0] or 0} заказов | {crypto[1] or 0}₽")
     await callback.message.edit_caption(caption=text, reply_markup=admin_menu(), parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query_handler(lambda c: c.data == "admin_orders")
 async def admin_orders_list(callback: types.CallbackQuery):
-    cursor.execute("SELECT id, product_name, price_rub, status, username, product_amount, category FROM orders ORDER BY id DESC")
+    cursor.execute("SELECT id, product_name, price_rub, status, username, product_amount, category, payment_method FROM orders ORDER BY id DESC")
     orders_list = cursor.fetchall()
     
     if not orders_list:
@@ -386,7 +535,7 @@ async def admin_orders_list(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data.startswith("orders_page_"))
 async def orders_page(callback: types.CallbackQuery):
     page = int(callback.data.split("_")[2])
-    cursor.execute("SELECT id, product_name, price_rub, status, username, product_amount, category FROM orders ORDER BY id DESC")
+    cursor.execute("SELECT id, product_name, price_rub, status, username, product_amount, category, payment_method FROM orders ORDER BY id DESC")
     orders_list = cursor.fetchall()
     
     await callback.message.edit_caption(
@@ -399,7 +548,7 @@ async def orders_page(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data.startswith("order_"))
 async def view_order(callback: types.CallbackQuery):
     order_id = int(callback.data.split("_")[1])
-    cursor.execute("SELECT id, user_id, username, product_name, product_amount, price_rub, status, created_at, category FROM orders WHERE id=?", (order_id,))
+    cursor.execute("SELECT id, user_id, username, product_name, product_amount, price_rub, status, created_at, category, payment_method FROM orders WHERE id=?", (order_id,))
     order = cursor.fetchone()
     
     if not order:
@@ -412,6 +561,7 @@ async def view_order(callback: types.CallbackQuery):
             f"📦 Товар: {order[3]} - {order[4]}\n"
             f"🎮 Категория: {order[8]}\n"
             f"💰 Цена: {order[5]}₽\n"
+            f"💳 Оплата: {order[9]}\n"
             f"📅 Дата: {order[7]}\n"
             f"📌 Статус: {order[6]}")
     await callback.message.edit_caption(caption=text, reply_markup=give_keyboard(order_id), parse_mode="Markdown")
@@ -523,5 +673,32 @@ async def unban_command(message: types.Message):
     except:
         await message.answer("❌ Ошибка!")
 
+# ===== АВТОПРОВЕРКА CRYPTO ОПЛАТ =====
+async def auto_check_crypto():
+    while True:
+        try:
+            cursor.execute("SELECT id, invoice_id, user_id FROM orders WHERE status='💳 Ожидание оплаты' AND payment_method='CryptoBot (USDT)'")
+            pending = cursor.fetchall()
+            
+            for order in pending:
+                order_id, invoice_id, user_id = order
+                if invoice_id:
+                    status = check_crypto_invoice(invoice_id)
+                    if status == "paid":
+                        cursor.execute("UPDATE orders SET status='✅ Оплачен (ожидает выдачи)' WHERE id=?", (order_id,))
+                        conn.commit()
+                        await bot.send_message(user_id, "✅ Ваш заказ оплачен! Ожидайте выдачи товара.")
+                        await bot.send_message(ADMIN_ID, f"💰 **АВТООПЛАТА (CRYPTO):** Заказ #{order_id} оплачен!")
+                    elif status == "expired":
+                        cursor.execute("UPDATE orders SET status='❌ Просрочен' WHERE id=?", (order_id,))
+                        conn.commit()
+        except Exception as e:
+            logging.error(f"Auto check error: {e}")
+        
+        await asyncio.sleep(15)
+
+# ===== ЗАПУСК =====
 if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.create_task(auto_check_crypto())
     executor.start_polling(dp, skip_updates=True)
