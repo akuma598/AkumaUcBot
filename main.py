@@ -127,10 +127,19 @@ def metro_menu():
 def payment_method_keyboard(product_id, amount, price_rub, price_stars, price_usdt, category):
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("⭐ Оплатить Stars", callback_data=f"pay_stars_{product_id}_{amount}_{price_rub}_{price_stars}_{category}"),
-        InlineKeyboardButton("₿ Оплатить USDT", callback_data=f"pay_crypto_{product_id}_{amount}_{price_rub}_{price_usdt}_{category}")
+        InlineKeyboardButton("⭐ Telegram Stars", callback_data=f"stars_{product_id}_{amount}_{price_rub}_{price_stars}_{category}"),
+        InlineKeyboardButton("₿ CryptoBot (USDT)", callback_data=f"crypto_{product_id}_{amount}_{price_rub}_{price_usdt}_{category}")
     )
     kb.add(InlineKeyboardButton("❌ Отмена", callback_data="back"))
+    return kb
+
+def stars_pay_menu(order_id, product_name, price_stars, price_rub):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("⭐ Оплатить Stars", callback_data=f"stars_pay_{order_id}_{product_name}_{price_stars}_{price_rub}"),
+        InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_stars_{order_id}"),
+        InlineKeyboardButton("🔙 Назад", callback_data="back")
+    )
     return kb
 
 def crypto_pay_menu(pay_url, invoice_id):
@@ -282,19 +291,19 @@ async def select_payment_method(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== ОПЛАТА STARS (СРАЗУ ОТКРЫВАЕТ ПЛАТЁЖ) =====
-@dp.callback_query_handler(lambda c: c.data.startswith("pay_stars_"))
-async def pay_with_stars(callback: types.CallbackQuery):
+# ===== ОПЛАТА STARS =====
+@dp.callback_query_handler(lambda c: c.data.startswith("stars_"))
+async def prepare_stars_payment(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
     
     parts = callback.data.split("_")
-    product_id = parts[2]
-    amount = parts[3]
-    price_rub = int(parts[4])
-    price_stars = int(parts[5])
-    category = parts[6]
+    product_id = parts[1]
+    amount = parts[2]
+    price_rub = int(parts[3])
+    price_stars = int(parts[4])
+    category = parts[5]
     
     product_names = {
         "60": "60 UC", "120": "120 UC", "180": "180 UC", "240": "240 UC",
@@ -327,35 +336,71 @@ async def pay_with_stars(callback: types.CallbackQuery):
     conn.commit()
     order_id = cursor.lastrowid
     
-    # ОТПРАВЛЯЕМ СЧЕТ (окно оплаты откроется сразу)
+    text = (
+        f"✅ **ЗАКАЗ #{order_id} СОЗДАН!**\n\n"
+        f"📦 Товар: {product_name}\n"
+        f"💰 Сумма: {price_rub}₽ ({price_stars} Stars)\n"
+        f"💳 Способ оплаты: Telegram Stars\n\n"
+        f"👇 Нажмите на кнопку для оплаты Stars:"
+    )
+    
+    await callback.message.edit_caption(
+        caption=text,
+        reply_markup=stars_pay_menu(order_id, product_name, price_stars, price_rub),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ===== ЗАПУСК ОПЛАТЫ STARS =====
+@dp.callback_query_handler(lambda c: c.data.startswith("stars_pay_"))
+async def stars_pay(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    order_id = int(parts[2])
+    product_name = parts[3]
+    price_stars = int(parts[4])
+    price_rub = int(parts[5])
+    
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=f"🛒 Заказ #{order_id}",
-        description=f"{product_name}",
+        description=product_name,
         payload=f"order_{order_id}",
         provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label=product_name, amount=price_stars)],
         start_parameter=f"order_{order_id}"
     )
+    await callback.answer()
+
+# ===== ПРОВЕРКА STARS ОПЛАТЫ =====
+@dp.callback_query_handler(lambda c: c.data.startswith("check_stars_"))
+async def check_stars_payment(callback: types.CallbackQuery):
+    order_id = int(callback.data.split("_")[2])
     
-    # Удаляем сообщение с выбором способа оплаты
-    await callback.message.delete()
+    cursor.execute("SELECT status FROM orders WHERE id=?", (order_id,))
+    order = cursor.fetchone()
+    
+    if order and order[0] == "✅ Оплачен (ожидает выдачи)":
+        await callback.answer("✅ Заказ уже оплачен!", show_alert=True)
+    elif order and order[0] == "💳 Ожидание оплаты":
+        await callback.answer("❌ Оплата пока не найдена. Нажмите «Оплатить Stars» и завершите платеж.", show_alert=True)
+    else:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
     await callback.answer()
 
 # ===== ОПЛАТА CRYPTO =====
-@dp.callback_query_handler(lambda c: c.data.startswith("pay_crypto_"))
+@dp.callback_query_handler(lambda c: c.data.startswith("crypto_"))
 async def pay_with_crypto(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
     
     parts = callback.data.split("_")
-    product_id = parts[2]
-    amount = parts[3]
-    price_rub = int(parts[4])
-    price_usdt = float(parts[5])
-    category = parts[6]
+    product_id = parts[1]
+    amount = parts[2]
+    price_rub = int(parts[3])
+    price_usdt = float(parts[4])
+    category = parts[5]
     
     product_names = {
         "60": "60 UC", "120": "120 UC", "180": "180 UC", "240": "240 UC",
@@ -430,7 +475,7 @@ async def check_crypto_payment(callback: types.CallbackQuery):
         await callback.answer("❌ Оплата не найдена. Попробуйте позже.", show_alert=True)
     await callback.answer()
 
-# ===== ПРОВЕРКА STARS ОПЛАТЫ (после успешной оплаты) =====
+# ===== УСПЕШНАЯ ОПЛАТА STARS =====
 @dp.pre_checkout_query_handler(lambda query: True)
 async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
