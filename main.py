@@ -17,7 +17,6 @@ logging.basicConfig(level=logging.INFO)
 conn = sqlite3.connect("shop.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# ===== ТАБЛИЦЫ =====
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +56,6 @@ CREATE TABLE IF NOT EXISTS faq (
 )
 """)
 
-# Добавляем стандартные FAQ
 cursor.execute("SELECT COUNT(*) FROM faq")
 if cursor.fetchone()[0] == 0:
     default_faq = [
@@ -82,7 +80,6 @@ async def is_banned(user_id):
     cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
     return cursor.fetchone() is not None
 
-# ===== ФУНКЦИИ ДЛЯ АВТОВЫДАЧИ =====
 def add_product_code(product_amount, code):
     cursor.execute("INSERT INTO product_codes (product_amount, code) VALUES (?, ?)", (product_amount, code))
     conn.commit()
@@ -100,7 +97,6 @@ def get_codes_count(product_amount):
     cursor.execute("SELECT COUNT(*) FROM product_codes WHERE product_amount=? AND is_used=0", (product_amount,))
     return cursor.fetchone()[0]
 
-# ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -206,7 +202,6 @@ def give_keyboard(order_id):
     kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
     return kb
 
-# ===== ОБРАБОТЧИКИ =====
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
     if await is_banned(message.from_user.id):
@@ -229,7 +224,6 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== ПОЛЬЗОВАТЕЛЬСКИЕ КНОПКИ =====
 @dp.callback_query_handler(lambda c: c.data == "buy_uc")
 async def show_uc(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
@@ -267,7 +261,6 @@ async def show_faq(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
-# ===== КНОПКА "ПОВТОРИТЬ ЗАКАЗ" =====
 @dp.callback_query_handler(lambda c: c.data.startswith("repeat_"))
 async def repeat_order(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
@@ -290,8 +283,8 @@ async def repeat_order(callback: types.CallbackQuery):
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         callback.from_user.id,
-        callback.from_user.username or "Аноним",
-        callback.from_user.first_name or "",
+        callback.from_user.username or "нет",
+        callback.from_user.first_name or "Пользователь",
         product_name,
         product_amount,
         price_rub,
@@ -327,7 +320,6 @@ async def back_to_orders(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== СОЗДАНИЕ ЗАКАЗА =====
 @dp.callback_query_handler(lambda c: c.data.startswith("select_"))
 async def create_order(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
@@ -341,13 +333,17 @@ async def create_order(callback: types.CallbackQuery):
     product_name = f"{product_amount} UC"
     price_stars = rub_to_stars(price_rub)
     
+    user_id = callback.from_user.id
+    username = callback.from_user.username or "нет"
+    first_name = callback.from_user.first_name or "Пользователь"
+    
     cursor.execute("""
         INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        callback.from_user.id,
-        callback.from_user.username or "Аноним",
-        callback.from_user.first_name or "",
+        user_id,
+        username,
+        first_name,
         product_name,
         product_amount,
         price_rub,
@@ -359,9 +355,15 @@ async def create_order(callback: types.CallbackQuery):
     conn.commit()
     order_id = cursor.lastrowid
     
+    # УВЕДОМЛЕНИЕ АДМИНУ (КЛИКАБЕЛЬНОЕ)
+    user_link = f"tg://user?id={user_id}"
     await bot.send_message(
         ADMIN_ID,
-        f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 {callback.from_user.first_name or 'Аноним'} (@{callback.from_user.username or 'нет'})\n📦 {product_name}\n💰 {price_rub}₽",
+        f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n"
+        f"👤 [{first_name}](tg://user?id={user_id})\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"📦 Товар: {product_name}\n"
+        f"💰 Сумма: {price_rub}₽",
         parse_mode="Markdown"
     )
     
@@ -380,7 +382,6 @@ async def create_order(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== ПОДТВЕРЖДЕНИЕ ОПЛАТЫ =====
 @dp.callback_query_handler(lambda c: c.data.startswith("confirm_pay_"))
 async def confirm_payment(callback: types.CallbackQuery):
     order_id = int(callback.data.split("_")[2])
@@ -404,7 +405,6 @@ async def confirm_payment(callback: types.CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
     await callback.answer()
 
-# ===== ПРОВЕРКА ОПЛАТЫ И АВТОВЫДАЧА =====
 @dp.pre_checkout_query_handler(lambda query: True)
 async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
@@ -446,15 +446,19 @@ async def successful_payment(message: types.Message):
                 f"📌 Товар будет выдан в ближайшее время.",
                 parse_mode="Markdown"
             )
+            user_link = f"tg://user?id={message.from_user.id}"
             await bot.send_message(
                 ADMIN_ID,
-                f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n👤 {message.from_user.first_name or 'Аноним'} (@{message.from_user.username or 'нет'})\n📦 {order[0]}\n💰 {order[1]}₽\n⭐ {order[2]} Stars",
+                f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n"
+                f"👤 [{message.from_user.first_name or 'Пользователь'}]({user_link})\n"
+                f"📦 {order[0]}\n"
+                f"💰 {order[1]}₽\n"
+                f"⭐ {order[2]} Stars",
                 parse_mode="Markdown"
             )
     else:
         await message.answer("❌ Заказ не найден")
 
-# ===== МОИ ЗАКАЗЫ =====
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
     cursor.execute("SELECT id, product_name, product_amount, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
@@ -507,7 +511,6 @@ async def user_order_detail(callback: types.CallbackQuery):
         await callback.message.edit_caption(caption=text, parse_mode="Markdown")
     await callback.answer()
 
-# ===== АДМИН ПАНЕЛЬ =====
 @dp.callback_query_handler(lambda c: c.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
     cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE status='✅ Оплачен (ожидает выдачи)' OR status='✅ Выполнен'")
@@ -553,7 +556,6 @@ async def orders_page(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== ПРОСМОТР ЗАКАЗА (С ИМЕНЕМ И ПЕРЕХОДОМ В ПРОФИЛЬ) =====
 @dp.callback_query_handler(lambda c: c.data.startswith("order_"))
 async def view_order(callback: types.CallbackQuery):
     order_id = int(callback.data.split("_")[1])
@@ -570,7 +572,7 @@ async def view_order(callback: types.CallbackQuery):
     
     user_link = f"tg://user?id={user_id}"
     
-    if username:
+    if username and username != "нет":
         user_display = f"@{username}"
     else:
         user_display = f"[{first_name}]({user_link})"
@@ -625,7 +627,6 @@ async def give_item(callback: types.CallbackQuery):
     await callback.answer()
     await bot.send_message(ADMIN_ID, f"✅ Заказ #{order_id} выполнен.")
 
-# ===== АДМИН КОДЫ ТОВАРОВ =====
 @dp.callback_query_handler(lambda c: c.data == "admin_codes")
 async def admin_codes(callback: types.CallbackQuery):
     await callback.message.edit_caption(
@@ -645,7 +646,6 @@ async def admin_add_codes(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== АДМИН FAQ =====
 @dp.callback_query_handler(lambda c: c.data == "admin_faq")
 async def admin_faq(callback: types.CallbackQuery):
     await callback.message.edit_caption(
@@ -720,7 +720,6 @@ async def admin_exit(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== АДМИН КОМАНДЫ =====
 @dp.message_handler(commands=['ban'])
 async def ban_command(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -761,10 +760,8 @@ async def unban_command(message: types.Message):
 async def ping(message: types.Message):
     await message.answer("🏓 Bot is alive!")
 
-# ===== ХРАНИЛИЩЕ ДЛЯ СОСТОЯНИЙ =====
 admin_state = {}
 
-# ===== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ =====
 @dp.message_handler()
 async def handle_admin_text(message: types.Message):
     user_id = str(message.from_user.id)
@@ -815,10 +812,6 @@ async def handle_admin_text(message: types.Message):
         del admin_state[user_id]
         await message.answer("❓ Управление FAQ:", reply_markup=admin_faq_menu())
         return
-
-@dp.message_handler(commands=['ping'])
-async def ping(message: types.Message):
-    await message.answer("🏓 Bot is alive!")
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
