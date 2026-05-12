@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     username TEXT,
+    first_name TEXT,
     product_name TEXT,
     product_amount TEXT,
     price_rub INTEGER,
@@ -39,7 +40,6 @@ CREATE TABLE IF NOT EXISTS banned (
 )
 """)
 
-# ===== ТАБЛИЦА ДЛЯ КОДОВ (АВТОВЫДАЧА) =====
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS product_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +49,6 @@ CREATE TABLE IF NOT EXISTS product_codes (
 )
 """)
 
-# ===== ТАБЛИЦА ДЛЯ FAQ =====
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS faq (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,9 +183,9 @@ def orders_keyboard(orders_list, page=0):
     start = page * 5
     end = start + 5
     for order in orders_list[start:end]:
-        status_emoji = "✅" if order[6] == "✅ Выполнен" else "⏳"
+        status_emoji = "✅" if order[7] == "✅ Выполнен" else "⏳"
         kb.add(InlineKeyboardButton(
-            f"{status_emoji} #{order[0]} | {order[1]} | {order[3]}₽",
+            f"{status_emoji} #{order[0]} | {order[4]} | {order[6]}₽",
             callback_data=f"order_{order[0]}"
         ))
     
@@ -277,7 +276,6 @@ async def repeat_order(callback: types.CallbackQuery):
     
     product_amount = callback.data.split("_")[1]
     
-    # Находим цену для этого товара
     prices = {
         "60": 78, "120": 141, "180": 204, "240": 267, "325": 356,
         "385": 419, "445": 482, "660": 708, "720": 771, "985": 1049,
@@ -288,11 +286,12 @@ async def repeat_order(callback: types.CallbackQuery):
     price_stars = rub_to_stars(price_rub)
     
     cursor.execute("""
-        INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_stars, status, category, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         callback.from_user.id,
         callback.from_user.username or "Аноним",
+        callback.from_user.first_name or "",
         product_name,
         product_amount,
         price_rub,
@@ -343,11 +342,12 @@ async def create_order(callback: types.CallbackQuery):
     price_stars = rub_to_stars(price_rub)
     
     cursor.execute("""
-        INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_stars, status, category, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         callback.from_user.id,
         callback.from_user.username or "Аноним",
+        callback.from_user.first_name or "",
         product_name,
         product_amount,
         price_rub,
@@ -359,10 +359,9 @@ async def create_order(callback: types.CallbackQuery):
     conn.commit()
     order_id = cursor.lastrowid
     
-    # Уведомление админу
     await bot.send_message(
         ADMIN_ID,
-        f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 @{callback.from_user.username or 'Аноним'}\n📦 {product_name}\n💰 {price_rub}₽",
+        f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 {callback.from_user.first_name or 'Аноним'} (@{callback.from_user.username or 'нет'})\n📦 {product_name}\n💰 {price_rub}₽",
         parse_mode="Markdown"
     )
     
@@ -422,7 +421,6 @@ async def successful_payment(message: types.Message):
         cursor.execute("UPDATE orders SET status='✅ Оплачен (ожидает выдачи)' WHERE id=?", (order_id,))
         conn.commit()
         
-        # АВТОВЫДАЧА
         product_amount = order[3]
         code = get_product_code(product_amount)
         
@@ -450,13 +448,13 @@ async def successful_payment(message: types.Message):
             )
             await bot.send_message(
                 ADMIN_ID,
-                f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n👤 @{message.from_user.username or 'Аноним'}\n📦 {order[0]}\n💰 {order[1]}₽\n⭐ {order[2]} Stars",
+                f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n👤 {message.from_user.first_name or 'Аноним'} (@{message.from_user.username or 'нет'})\n📦 {order[0]}\n💰 {order[1]}₽\n⭐ {order[2]} Stars",
                 parse_mode="Markdown"
             )
     else:
         await message.answer("❌ Заказ не найден")
 
-# ===== МОИ ЗАКАЗЫ (с кнопкой повторить) =====
+# ===== МОИ ЗАКАЗЫ =====
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
     cursor.execute("SELECT id, product_name, product_amount, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
@@ -528,7 +526,7 @@ async def admin_stats(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "admin_orders")
 async def admin_orders_list(callback: types.CallbackQuery):
-    cursor.execute("SELECT id, product_name, price_rub, status, username FROM orders ORDER BY id DESC")
+    cursor.execute("SELECT id, product_name, price_rub, status, username, first_name FROM orders ORDER BY id DESC")
     orders_list = cursor.fetchall()
     
     if not orders_list:
@@ -545,7 +543,7 @@ async def admin_orders_list(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data.startswith("orders_page_"))
 async def orders_page(callback: types.CallbackQuery):
     page = int(callback.data.split("_")[2])
-    cursor.execute("SELECT id, product_name, price_rub, status, username FROM orders ORDER BY id DESC")
+    cursor.execute("SELECT id, product_name, price_rub, status, username, first_name FROM orders ORDER BY id DESC")
     orders_list = cursor.fetchall()
     
     await callback.message.edit_caption(
@@ -555,24 +553,42 @@ async def orders_page(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+# ===== ПРОСМОТР ЗАКАЗА (С ИМЕНЕМ И ПЕРЕХОДОМ В ПРОФИЛЬ) =====
 @dp.callback_query_handler(lambda c: c.data.startswith("order_"))
 async def view_order(callback: types.CallbackQuery):
     order_id = int(callback.data.split("_")[1])
-    cursor.execute("SELECT id, user_id, username, product_name, price_rub, status, created_at FROM orders WHERE id=?", (order_id,))
+    cursor.execute("SELECT id, user_id, username, first_name, product_name, price_rub, status, created_at FROM orders WHERE id=?", (order_id,))
     order = cursor.fetchone()
     
     if not order:
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
+    user_id = order[1]
+    username = order[2]
+    first_name = order[3] or "Пользователь"
+    
+    user_link = f"tg://user?id={user_id}"
+    
+    if username:
+        user_display = f"@{username}"
+    else:
+        user_display = f"[{first_name}]({user_link})"
+    
     text = (f"📋 **ЗАКАЗ #{order[0]}**\n"
-            f"👤 @{order[2] or 'Аноним'}\n"
-            f"🆔 ID: {order[1]}\n"
-            f"📦 Товар: {order[3]}\n"
-            f"💰 Цена: {order[4]}₽\n"
-            f"📅 Дата: {order[6]}\n"
-            f"📌 Статус: {order[5]}")
-    await callback.message.edit_caption(caption=text, reply_markup=give_keyboard(order_id), parse_mode="Markdown")
+            f"👤 Пользователь: {user_display}\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"📦 Товар: {order[4]}\n"
+            f"💰 Цена: {order[5]}₽\n"
+            f"📅 Дата: {order[7]}\n"
+            f"📌 Статус: {order[6]}")
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(InlineKeyboardButton("✅ Выдать товар", callback_data=f"give_{order[0]}"))
+    kb.add(InlineKeyboardButton("💬 Написать", url=user_link))
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
+    
+    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("give_"))
@@ -586,7 +602,6 @@ async def give_item(callback: types.CallbackQuery):
         await callback.answer("❌ Заказ не найден", show_alert=True)
         return
     
-    # Проверяем автовыдачу
     code = get_product_code(order[2])
     
     if code:
@@ -625,7 +640,7 @@ async def admin_add_codes(callback: types.CallbackQuery):
     product_amount = callback.data.split("_")[2]
     admin_state[callback.from_user.id] = f"add_codes_{product_amount}"
     await callback.message.edit_caption(
-        caption=f"🔑 **ДОБАВЛЕНИЕ КОДОВ ДЛЯ {product_amount} UC**\n\nВведите коды (каждый с новой строки):\n\nПример:\n`CODE123456`\n`CODE789012`\n\nДля товаров с автовыдачей коды выдаются автоматически после оплаты.",
+        caption=f"🔑 **ДОБАВЛЕНИЕ КОДОВ ДЛЯ {product_amount} UC**\n\nВведите коды (каждый с новой строки):\n\nПример:\n`CODE123456`\n`CODE789012`",
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -749,7 +764,7 @@ async def ping(message: types.Message):
 # ===== ХРАНИЛИЩЕ ДЛЯ СОСТОЯНИЙ =====
 admin_state = {}
 
-# ===== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ (коды, FAQ) =====
+# ===== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ =====
 @dp.message_handler()
 async def handle_admin_text(message: types.Message):
     user_id = str(message.from_user.id)
@@ -759,7 +774,6 @@ async def handle_admin_text(message: types.Message):
     
     state = admin_state[user_id]
     
-    # Добавление кодов
     if state.startswith("add_codes_"):
         product_amount = state.split("_")[2]
         codes_list = message.text.strip().split("\n")
@@ -773,7 +787,6 @@ async def handle_admin_text(message: types.Message):
         await message.answer("🔑 Управление кодами:", reply_markup=admin_codes_menu())
         return
     
-    # Редактирование FAQ
     if state.startswith("edit_faq_"):
         faq_id = int(state.split("_")[2])
         parts = message.text.split("|")
@@ -789,7 +802,6 @@ async def handle_admin_text(message: types.Message):
         await message.answer("❓ Управление FAQ:", reply_markup=admin_faq_menu())
         return
     
-    # Добавление FAQ
     if state == "add_faq":
         parts = message.text.split("|")
         if len(parts) == 2:
