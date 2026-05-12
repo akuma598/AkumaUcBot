@@ -327,7 +327,7 @@ async def pay_with_stars(callback: types.CallbackQuery):
     conn.commit()
     order_id = cursor.lastrowid
     
-    # СРАЗУ ОТПРАВЛЯЕМ СЧЕТ (без лишней кнопки)
+    # ОТПРАВЛЯЕМ СЧЕТ (окно оплаты откроется сразу)
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=f"🛒 Заказ #{order_id}",
@@ -339,27 +339,9 @@ async def pay_with_stars(callback: types.CallbackQuery):
         start_parameter=f"order_{order_id}"
     )
     
-    # Отправляем сообщение с кнопкой проверки оплаты
-    text = (
-        f"✅ **ЗАКАЗ #{order_id} СОЗДАН!**\n\n"
-        f"📦 Товар: {product_name}\n"
-        f"💰 Сумма: {price_rub}₽ ({price_stars} Stars)\n"
-        f"💳 Способ оплаты: Telegram Stars\n\n"
-        f"📌 После оплаты нажмите «Проверить оплату»:"
-    )
-    
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"check_stars_{order_id}"))
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
-    
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=kb,
-        parse_mode="Markdown"
-    )
+    # Удаляем сообщение с выбором способа оплаты
+    await callback.message.delete()
     await callback.answer()
-    
-    await bot.send_message(ADMIN_ID, f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 @{callback.from_user.username or 'Аноним'}\n📦 {product_name}\n💰 {price_rub}₽ ({price_stars} Stars)\n💳 Telegram Stars")
 
 # ===== ОПЛАТА CRYPTO =====
 @dp.callback_query_handler(lambda c: c.data.startswith("pay_crypto_"))
@@ -448,22 +430,7 @@ async def check_crypto_payment(callback: types.CallbackQuery):
         await callback.answer("❌ Оплата не найдена. Попробуйте позже.", show_alert=True)
     await callback.answer()
 
-# ===== ПРОВЕРКА STARS ОПЛАТЫ =====
-@dp.callback_query_handler(lambda c: c.data.startswith("check_stars_"))
-async def check_stars_payment(callback: types.CallbackQuery):
-    order_id = int(callback.data.split("_")[2])
-    
-    cursor.execute("SELECT status FROM orders WHERE id=?", (order_id,))
-    order = cursor.fetchone()
-    
-    if order and order[0] == "✅ Оплачен (ожидает выдачи)":
-        await callback.answer("✅ Заказ уже оплачен!", show_alert=True)
-    elif order and order[0] == "💳 Ожидание оплаты":
-        await callback.answer("❌ Оплата пока не найдена. Пожалуйста, завершите платёж.", show_alert=True)
-    else:
-        await callback.answer("❌ Заказ не найден", show_alert=True)
-    await callback.answer()
-
+# ===== ПРОВЕРКА STARS ОПЛАТЫ (после успешной оплаты) =====
 @dp.pre_checkout_query_handler(lambda query: True)
 async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
