@@ -23,9 +23,11 @@ CREATE TABLE IF NOT EXISTS orders (
     user_id INTEGER,
     username TEXT,
     product_name TEXT,
+    product_amount TEXT,
     price_rub INTEGER,
     price_stars INTEGER,
     status TEXT,
+    category TEXT,
     created_at TEXT
 )
 """)
@@ -46,33 +48,62 @@ async def is_banned(user_id):
     cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
     return cursor.fetchone() is not None
 
-# ===== КЛАВИАТУРЫ =====
+# ===== ГЛАВНОЕ МЕНЮ (как GADZHIK SERVICE) =====
 def main_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
+    kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
-        InlineKeyboardButton("💰 Купить UC", callback_data="buy_uc"),
-        InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
-        InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
-        InlineKeyboardButton("🔗 Поддержка", url="https://t.me/your_support")
+        InlineKeyboardButton("🛒 КУПИТЬ UC / ПП / PRIME / НАБОРЫ", callback_data="buy_menu"),
+        InlineKeyboardButton("⭐ ОТЗЫВЫ", url="https://t.me/your_reviews"),
+        InlineKeyboardButton("💬 ТЕХ-ПОДДЕРЖКА", url="https://t.me/your_support"),
+        InlineKeyboardButton("🌐 САЙТ [БЕЗ VPN]", url="https://your-site.com"),
+        InlineKeyboardButton("🤝 ОТКРЫТЫ К СОТРУДНИЧЕСТВУ", callback_data="cooperation")
     )
     return kb
 
-def uc_menu():
+def buy_menu():
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton("💰 Купить UC [По айди]", callback_data="buy_uc_by_id"),
+        InlineKeyboardButton("🔥 По айди [От 8100 Uc+]", callback_data="buy_uc_big"),
+        InlineKeyboardButton("📱 Купить UC [По входу]", callback_data="buy_uc_by_login"),
+        InlineKeyboardButton("🎫 ПОПУЛЯРНОСТЬ / БИЛЕТЫ ДОМА", callback_data="popularity"),
+        InlineKeyboardButton("🟢 PRIME / PRIME+ / НАБОРЫ", callback_data="prime"),
+        InlineKeyboardButton("🟡 APOLLO / X-КОСТЮМЫ", callback_data="apollo"),
+        InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_menu")
+    )
+    return kb
+
+def uc_selection_keyboard():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("📦 60 UC — 63₽", callback_data="product_60_63"),
-        InlineKeyboardButton("📦 120 UC — 126₽", callback_data="product_120_126"),
-        InlineKeyboardButton("📦 180 UC — 189₽", callback_data="product_180_189"),
-        InlineKeyboardButton("📦 240 UC — 252₽", callback_data="product_240_252"),
-        InlineKeyboardButton("📦 325 UC — 341₽", callback_data="product_325_341"),
-        InlineKeyboardButton("📦 385 UC — 404₽", callback_data="product_385_404"),
-        InlineKeyboardButton("📦 445 UC — 467₽", callback_data="product_445_467"),
-        InlineKeyboardButton("📦 660 UC — 693₽", callback_data="product_660_693"),
-        InlineKeyboardButton("📦 720 UC — 756₽", callback_data="product_720_756"),
-        InlineKeyboardButton("📦 985 UC — 1034₽", callback_data="product_985_1034"),
-        InlineKeyboardButton("📦 1320 UC — 1386₽", callback_data="product_1320_1386"),
-        InlineKeyboardButton("📦 1800 UC — 1890₽", callback_data="product_1800_1890"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="back")
+        InlineKeyboardButton("60 UC — 63₽", callback_data="product_60_63"),
+        InlineKeyboardButton("120 UC — 126₽", callback_data="product_120_126"),
+        InlineKeyboardButton("180 UC — 189₽", callback_data="product_180_189"),
+        InlineKeyboardButton("240 UC — 252₽", callback_data="product_240_252"),
+        InlineKeyboardButton("325 UC — 341₽", callback_data="product_325_341"),
+        InlineKeyboardButton("385 UC — 404₽", callback_data="product_385_404"),
+        InlineKeyboardButton("445 UC — 467₽", callback_data="product_445_467"),
+        InlineKeyboardButton("660 UC — 693₽", callback_data="product_660_693"),
+        InlineKeyboardButton("720 UC — 756₽", callback_data="product_720_756"),
+        InlineKeyboardButton("985 UC — 1034₽", callback_data="product_985_1034"),
+        InlineKeyboardButton("1320 UC — 1386₽", callback_data="product_1320_1386"),
+        InlineKeyboardButton("1800 UC — 1890₽", callback_data="product_1800_1890"),
+        InlineKeyboardButton("🔙 НАЗАД", callback_data="buy_menu")
+    )
+    return kb
+
+def big_uc_selection_keyboard():
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("8100 UC — 8505₽", callback_data="product_8100_8505"),
+        InlineKeyboardButton("9900 UC — 10395₽", callback_data="product_9900_10395"),
+        InlineKeyboardButton("11950 UC — 12548₽", callback_data="product_11950_12548"),
+        InlineKeyboardButton("16200 UC — 17010₽", callback_data="product_16200_17010"),
+        InlineKeyboardButton("24300 UC — 25515₽", callback_data="product_24300_25515"),
+        InlineKeyboardButton("32400 UC — 34020₽", callback_data="product_32400_34020"),
+        InlineKeyboardButton("40500 UC — 42525₽", callback_data="product_40500_42525"),
+        InlineKeyboardButton("81000 UC — 85050₽", callback_data="product_81000_85050"),
+        InlineKeyboardButton("🔙 НАЗАД", callback_data="buy_menu")
     )
     return kb
 
@@ -93,9 +124,9 @@ def orders_keyboard(orders_list, page=0):
     start = page * 5
     end = start + 5
     for order in orders_list[start:end]:
-        status_emoji = "✅" if order[4] == "✅ Выполнен" else "⏳"
+        status_emoji = "✅" if order[6] == "✅ Выполнен" else "⏳"
         kb.add(InlineKeyboardButton(
-            f"{status_emoji} #{order[0]} | {order[1]} | {order[2]}₽",
+            f"{status_emoji} #{order[0]} | {order[1]} | {order[3]}₽",
             callback_data=f"order_{order[0]}"
         ))
     
@@ -123,7 +154,7 @@ async def start_command(message: types.Message):
         await message.answer("❌ Вы забанены")
         return
     
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\nЗдесь вы можете быстро и удобно купить UC.\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать, мы работаем 24/7**\n\nЗдесь вы можете быстро и удобно пополнить баланс и купить товары, и подписки для популярных игр.\n\n👇 Используйте меню ниже:"
     
     await message.answer_photo(
         photo=WELCOME_IMAGE,
@@ -139,22 +170,10 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== ВЫБОР ТОВАРА =====
-@dp.callback_query_handler(lambda c: c.data == "buy_uc")
-async def show_uc(callback: types.CallbackQuery):
-    if await is_banned(callback.from_user.id):
-        await callback.answer("❌ Вы забанены", show_alert=True)
-        return
-    await callback.message.edit_caption(
-        caption="💰 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC:**\n\nОплата рублями через Telegram Stars.",
-        reply_markup=uc_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "back")
-async def back(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+# ===== НАВИГАЦИЯ =====
+@dp.callback_query_handler(lambda c: c.data == "back_to_menu")
+async def back_to_menu(callback: types.CallbackQuery):
+    text = "👋 **Добро пожаловать, мы работаем 24/7**\n\nЗдесь вы можете быстро и удобно пополнить баланс и купить товары, и подписки для популярных игр.\n\n👇 Используйте меню ниже:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
@@ -162,7 +181,79 @@ async def back(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== ПОКУПКА ТОВАРА (СРАЗУ ОПЛАТА) =====
+@dp.callback_query_handler(lambda c: c.data == "buy_menu")
+async def show_buy_menu(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🛍️ **ВЫБЕРИТЕ ТИП ПОКУПКИ:**",
+        reply_markup=buy_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "buy_uc_by_id")
+async def show_uc_products(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="💰 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC:**",
+        reply_markup=uc_selection_keyboard(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "buy_uc_big")
+async def show_big_uc_products(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🔥 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC (ОТ 8100):**",
+        reply_markup=big_uc_selection_keyboard(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "buy_uc_by_login")
+async def buy_by_login(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🚧 **РАЗДЕЛ В РАЗРАБОТКЕ**\n\nПокупка по входу скоро появится.",
+        reply_markup=buy_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "popularity")
+async def popularity(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🎫 **ПОПУЛЯРНОСТЬ / БИЛЕТЫ ДОМА**\n\nСкоро будет доступно!",
+        reply_markup=buy_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "prime")
+async def prime(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🟢 **PRIME / PRIME+ / НАБОРЫ**\n\nСкоро будет доступно!",
+        reply_markup=buy_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "apollo")
+async def apollo(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🟡 **APOLLO / X-КОСТЮМЫ**\n\nСкоро будет доступно!",
+        reply_markup=buy_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "cooperation")
+async def cooperation(callback: types.CallbackQuery):
+    await callback.message.edit_caption(
+        caption="🤝 **СОТРУДНИЧЕСТВО**\n\nПо вопросам сотрудничества: @aakumma",
+        reply_markup=buy_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ===== ПОКУПКА ТОВАРА (ОПЛАТА STARS) =====
 @dp.callback_query_handler(lambda c: c.data.startswith("product_"))
 async def buy_product(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
@@ -170,39 +261,33 @@ async def buy_product(callback: types.CallbackQuery):
         return
     
     parts = callback.data.split("_")
-    product_id = parts[1]
+    product_amount = parts[1]
     price_rub = int(parts[2])
     
-    product_names = {
-        "60": "60 UC", "120": "120 UC", "180": "180 UC", "240": "240 UC",
-        "325": "325 UC", "385": "385 UC", "445": "445 UC", "660": "660 UC",
-        "720": "720 UC", "985": "985 UC", "1320": "1320 UC", "1800": "1800 UC"
-    }
-    
-    product_name = product_names.get(product_id, product_id)
+    product_name = f"{product_amount} UC"
     price_stars = rub_to_stars(price_rub)
     
-    # Сохраняем заказ
     cursor.execute("""
-        INSERT INTO orders (user_id, username, product_name, price_rub, price_stars, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO orders (user_id, username, product_name, product_amount, price_rub, price_stars, status, category, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         callback.from_user.id,
         callback.from_user.username or "Аноним",
         product_name,
+        product_amount,
         price_rub,
         price_stars,
         "💳 Ожидание оплаты",
+        "UC",
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ))
     conn.commit()
     order_id = cursor.lastrowid
     
-    # ОТПРАВЛЯЕМ СЧЕТ СРАЗУ
     await bot.send_invoice(
         chat_id=callback.from_user.id,
         title=f"🛒 Заказ #{order_id}",
-        description=product_name,
+        description=f"{product_name} - {price_rub}₽",
         payload=f"order_{order_id}",
         provider_token="",
         currency="XTR",
@@ -210,7 +295,6 @@ async def buy_product(callback: types.CallbackQuery):
         start_parameter=f"order_{order_id}"
     )
     
-    # Удаляем сообщение с меню
     await callback.message.delete()
     await callback.answer()
 
@@ -395,7 +479,7 @@ async def admin_back(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "admin_exit")
 async def admin_exit(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать, мы работаем 24/7**\n\nЗдесь вы можете быстро и удобно пополнить баланс и купить товары, и подписки для популярных игр.\n\n👇 Используйте меню ниже:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
@@ -439,6 +523,10 @@ async def unban_command(message: types.Message):
         await message.answer(f"✅ Пользователь {user_id} разбанен")
     except:
         await message.answer("❌ Ошибка!")
+
+@dp.message_handler(commands=['ping'])
+async def ping(message: types.Message):
+    await message.answer("🏓 Bot is alive!")
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
