@@ -82,10 +82,10 @@ SITE_URL = "https://akuma-shop-x2ly.vercel.app"
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("💰 Купить UC", callback_data="buy_uc"),
-        InlineKeyboardButton("🎉 Купить ПП", callback_data="buy_pp"),
-        InlineKeyboardButton("📦 Подписки Prime", callback_data="buy_prime"),
-        InlineKeyboardButton("👗 X-костюмы", callback_data="buy_costumes"),
+        InlineKeyboardButton("💰 Купить UC", url=SITE_URL + "?section=uc"),
+        InlineKeyboardButton("🎉 Купить ПП", url=SITE_URL + "?section=pp"),
+        InlineKeyboardButton("📦 Подписки Prime", url=SITE_URL + "?section=prime"),
+        InlineKeyboardButton("👗 X-костюмы", url=SITE_URL + "?section=costumes"),
         InlineKeyboardButton("📱 САЙТ", url=SITE_URL),
         InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
         InlineKeyboardButton("❓ FAQ", callback_data="show_faq"),
@@ -211,47 +211,7 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== КНОПКИ СРАЗУ ОТКРЫВАЮТ САЙТ В WEBVIEW =====
-@dp.callback_query_handler(lambda c: c.data == "buy_uc")
-async def buy_uc(callback: types.CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        "🌐 Открытие сайта...",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("🌐 Перейти на сайт UC", url=SITE_URL + "?section=uc")
-        )
-    )
-
-@dp.callback_query_handler(lambda c: c.data == "buy_pp")
-async def buy_pp(callback: types.CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        "🌐 Открытие сайта...",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("🌐 Перейти на сайт ПП", url=SITE_URL + "?section=pp")
-        )
-    )
-
-@dp.callback_query_handler(lambda c: c.data == "buy_prime")
-async def buy_prime(callback: types.CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        "🌐 Открытие сайта...",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("🌐 Перейти на сайт Prime", url=SITE_URL + "?section=prime")
-        )
-    )
-
-@dp.callback_query_handler(lambda c: c.data == "buy_costumes")
-async def buy_costumes(callback: types.CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        "🌐 Открытие сайта...",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("🌐 Перейти на сайт X-костюмы", url=SITE_URL + "?section=costumes")
-        )
-    )
-
+# ===== ПОЛЬЗОВАТЕЛЬСКИЕ КНОПКИ =====
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
     cursor.execute("SELECT id, product_name, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
