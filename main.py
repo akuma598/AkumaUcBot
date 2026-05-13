@@ -75,25 +75,22 @@ conn.commit()
 
 WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
 
-# Ссылка на сайт с разделами
+# Ссылка на сайт с параметрами разделов
 SITE_URL = "https://akuma-shop-x2ly.vercel.app"
 
 # ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("📱 САЙТ (ЛУЧШИЙ ВЫБОР)", url=SITE_URL),
-        InlineKeyboardButton("💰 Купить UC", callback_data="cat_uc"),
-        InlineKeyboardButton("🎉 Купить ПП", callback_data="cat_pp"),
-        InlineKeyboardButton("📦 Подписки", callback_data="cat_prime"),
-        InlineKeyboardButton("🎮 ДРУГИЕ ИГРЫ", callback_data="other_games"),
-        InlineKeyboardButton("📝 Отзывы", url="https://t.me/your_reviews"),
-        InlineKeyboardButton("⭐ ТГ ТОВАРЫ", callback_data="tg_products"),
-        InlineKeyboardButton("🔗 МОИ СОЦСЕТИ", url="https://t.me/your_socials"),
-        InlineKeyboardButton("👗 X-КОСТЮМЫ", callback_data="cat_costumes"),
-        InlineKeyboardButton("📦 МОИ ЗАКАЗЫ", callback_data="my_orders"),
+        InlineKeyboardButton("💰 Купить UC", callback_data="buy_uc"),
+        InlineKeyboardButton("🎉 Купить ПП", callback_data="buy_pp"),
+        InlineKeyboardButton("📦 Подписки Prime", callback_data="buy_prime"),
+        InlineKeyboardButton("👗 X-костюмы", callback_data="buy_costumes"),
+        InlineKeyboardButton("📱 САЙТ", url=SITE_URL),
+        InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
         InlineKeyboardButton("❓ FAQ", callback_data="show_faq"),
-        InlineKeyboardButton("🔗 ПОДДЕРЖКА", url="https://t.me/your_support")
+        InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
+        InlineKeyboardButton("🔗 Поддержка", url="https://t.me/your_support")
     )
     return kb
 
@@ -214,34 +211,46 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== КНОПКИ ПЕРЕХОДА НА САЙТ В РАЗДЕЛЫ =====
-@dp.callback_query_handler(lambda c: c.data == "cat_uc")
-async def cat_uc(callback: types.CallbackQuery):
+# ===== КНОПКИ СРАЗУ ОТКРЫВАЮТ САЙТ В WEBVIEW =====
+@dp.callback_query_handler(lambda c: c.data == "buy_uc")
+async def buy_uc(callback: types.CallbackQuery):
     await callback.answer()
-    await callback.message.answer("🌐 Перейдите на сайт для покупки UC:\n" + SITE_URL + "?section=uc")
+    await callback.message.answer(
+        "🌐 Открытие сайта...",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("🌐 Перейти на сайт UC", url=SITE_URL + "?section=uc")
+        )
+    )
 
-@dp.callback_query_handler(lambda c: c.data == "cat_pp")
-async def cat_pp(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "buy_pp")
+async def buy_pp(callback: types.CallbackQuery):
     await callback.answer()
-    await callback.message.answer("🌐 Перейдите на сайт для покупки ПП (Популярность):\n" + SITE_URL + "?section=pp")
+    await callback.message.answer(
+        "🌐 Открытие сайта...",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("🌐 Перейти на сайт ПП", url=SITE_URL + "?section=pp")
+        )
+    )
 
-@dp.callback_query_handler(lambda c: c.data == "cat_prime")
-async def cat_prime(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "buy_prime")
+async def buy_prime(callback: types.CallbackQuery):
     await callback.answer()
-    await callback.message.answer("🌐 Перейдите на сайт для покупки Prime подписок:\n" + SITE_URL + "?section=prime")
+    await callback.message.answer(
+        "🌐 Открытие сайта...",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("🌐 Перейти на сайт Prime", url=SITE_URL + "?section=prime")
+        )
+    )
 
-@dp.callback_query_handler(lambda c: c.data == "cat_costumes")
-async def cat_costumes(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "buy_costumes")
+async def buy_costumes(callback: types.CallbackQuery):
     await callback.answer()
-    await callback.message.answer("🌐 Перейдите на сайт для покупки X-костюмов:\n" + SITE_URL + "?section=costumes")
-
-@dp.callback_query_handler(lambda c: c.data == "other_games")
-async def other_games(callback: types.CallbackQuery):
-    await callback.answer("🚧 Раздел в разработке", show_alert=True)
-
-@dp.callback_query_handler(lambda c: c.data == "tg_products")
-async def tg_products(callback: types.CallbackQuery):
-    await callback.answer("🚧 Раздел в разработке", show_alert=True)
+    await callback.message.answer(
+        "🌐 Открытие сайта...",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("🌐 Перейти на сайт X-костюмы", url=SITE_URL + "?section=costumes")
+        )
+    )
 
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
