@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS faq (
 cursor.execute("SELECT COUNT(*) FROM faq")
 if cursor.fetchone()[0] == 0:
     default_faq = [
-        ("❓ Как оплатить заказ?", "Оплата проходит через Telegram Stars или переводом на карту. После оплаты нажмите «Я оплатил»."),
+        ("❓ Как оплатить заказ?", "Оплата происходит переводом на карту. После оплаты нажмите «Я оплатил» в боте."),
         ("⏱️ Как быстро приходит товар?", "Обычно в течение 5-15 минут после подтверждения оплаты."),
         ("🆘 Не пришёл товар. Что делать?", "Напишите в поддержку через кнопку «Поддержка» в главном меню. Укажите номер заказа."),
         ("🔄 Можно вернуть деньги?", "Возврат средств возможен в течение 15 минут после оплаты, если товар не был выдан."),
@@ -184,12 +184,6 @@ def user_orders_keyboard(orders_list):
     kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
     return kb
 
-def repeat_order_keyboard(product_amount):
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔄 Повторить заказ", callback_data=f"repeat_{product_amount}"))
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="my_orders"))
-    return kb
-
 # ===== ОБРАБОТЧИКИ =====
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
@@ -199,32 +193,53 @@ async def start_command(message: types.Message):
     
     args = message.get_args()
     
-    # Обработка заказа с сайта
+    # === ОБРАБОТКА ЗАКАЗА С САЙТА ===
     if args and args.startswith("order_"):
         try:
-            order_id = int(args.split("_")[1])
+            order_id = args.split("_")[1]
             
-            # Здесь можно получить данные заказа из отдельной таблицы
-            # Для простоты создаём новый заказ в боте
+            # Сохраняем заказ в БД бота
+            cursor.execute("""
+                INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                message.from_user.id,
+                message.from_user.username or "нет",
+                message.from_user.first_name or "Пользователь",
+                f"Заказ с сайта #{order_id}",
+                "0",
+                0,
+                0,
+                "⏳ Ожидает подтверждения оплаты",
+                "Сайт",
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ))
+            conn.commit()
+            bot_order_id = cursor.lastrowid
+            
             await message.answer(
                 f"✅ **ВАШ ЗАКАЗ ПРИНЯТ!**\n\n"
                 f"🆔 Номер заказа: #{order_id}\n\n"
                 f"📌 Статус: Ожидает подтверждения оплаты\n\n"
-                f"👨‍💻 Админ проверит оплату и выдаст товар в ближайшее время.\n\n"
+                f"👨‍💻 После проверки оплаты товар будет выдан.\n\n"
                 f"📞 Вопросы: @aakumma",
                 parse_mode="Markdown"
             )
             
+            # Уведомляем админа
             await bot.send_message(
                 ADMIN_ID,
-                f"🆕 **НОВЫЙ ЗАКАЗ С САЙТА**\n🆔 #{order_id}\n👤 @{message.from_user.username or 'Аноним'}",
+                f"🆕 **НОВЫЙ ЗАКАЗ С САЙТА**\n"
+                f"🆔 Номер: #{order_id}\n"
+                f"👤 {message.from_user.first_name or 'Пользователь'} (@{message.from_user.username or 'нет'})\n"
+                f"📞 [Написать пользователю](tg://user?id={message.from_user.id})",
                 parse_mode="Markdown"
             )
             return
-        except:
-            pass
+        except Exception as e:
+            print(f"Ошибка: {e}")
     
-    # Обычный старт
+    # === ОБЫЧНЫЙ СТАРТ ===
     text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
     
     await message.answer_photo(
@@ -275,23 +290,8 @@ async def user_order_detail(callback: types.CallbackQuery):
             f"📅 Дата: {order[5]}\n"
             f"📌 Статус: {order[4]}")
     
-    if order[4] == "✅ Выполнен":
-        await callback.message.edit_caption(
-            caption=text,
-            reply_markup=repeat_order_keyboard(order[2]),
-            parse_mode="Markdown"
-        )
-    else:
-        await callback.message.edit_caption(caption=text, parse_mode="Markdown")
+    await callback.message.edit_caption(caption=text, parse_mode="Markdown")
     await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("repeat_"))
-async def repeat_order(callback: types.CallbackQuery):
-    if await is_banned(callback.from_user.id):
-        await callback.answer("❌ Вы забанены", show_alert=True)
-        return
-    
-    await callback.answer("🔄 Перейдите на сайт для оформления нового заказа: https://akuma-shop-x2ly.vercel.app", show_alert=True)
 
 @dp.callback_query_handler(lambda c: c.data == "show_faq")
 async def show_faq(callback: types.CallbackQuery):
