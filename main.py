@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO)
 conn = sqlite3.connect("shop.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# ===== СОЗДАНИЕ ТАБЛИЦ =====
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,11 +57,12 @@ CREATE TABLE IF NOT EXISTS faq (
 )
 """)
 
+# Добавляем стандартные FAQ
 cursor.execute("SELECT COUNT(*) FROM faq")
 if cursor.fetchone()[0] == 0:
     default_faq = [
-        ("❓ Как оплатить заказ?", "Оплата проходит через Telegram Stars. Нажмите «Оплатить Stars» и следуйте инструкциям."),
-        ("⏱️ Как быстро приходит товар?", "Для товаров с автовыдачей — мгновенно. Для остальных — в течение 5-15 минут после оплаты."),
+        ("❓ Как оплатить заказ?", "Оплата проходит через Telegram Stars или переводом на карту. После оплаты нажмите «Я оплатил»."),
+        ("⏱️ Как быстро приходит товар?", "Обычно в течение 5-15 минут после подтверждения оплаты."),
         ("🆘 Не пришёл товар. Что делать?", "Напишите в поддержку через кнопку «Поддержка» в главном меню. Укажите номер заказа."),
         ("🔄 Можно вернуть деньги?", "Возврат средств возможен в течение 15 минут после оплаты, если товар не был выдан."),
         ("📞 Как связаться с админом?", "Нажмите кнопку «Поддержка» в главном меню или напишите @aakumma")
@@ -80,6 +82,7 @@ async def is_banned(user_id):
     cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
     return cursor.fetchone() is not None
 
+# ===== ФУНКЦИИ ДЛЯ КОДОВ =====
 def add_product_code(product_amount, code):
     cursor.execute("INSERT INTO product_codes (product_amount, code) VALUES (?, ?)", (product_amount, code))
     conn.commit()
@@ -97,48 +100,16 @@ def get_codes_count(product_amount):
     cursor.execute("SELECT COUNT(*) FROM product_codes WHERE product_amount=? AND is_used=0", (product_amount,))
     return cursor.fetchone()[0]
 
+# ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("💰 Купить UC", callback_data="buy_uc"),
+        InlineKeyboardButton("💰 Купить UC", url="https://akuma-shop-x2ly.vercel.app"),
         InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
         InlineKeyboardButton("❓ FAQ", callback_data="show_faq"),
         InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
         InlineKeyboardButton("🔗 Поддержка", url="https://t.me/your_support")
     )
-    return kb
-
-def uc_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("📦 60 UC — 78₽", callback_data="select_60_78"),
-        InlineKeyboardButton("📦 120 UC — 141₽", callback_data="select_120_141"),
-        InlineKeyboardButton("📦 180 UC — 204₽", callback_data="select_180_204"),
-        InlineKeyboardButton("📦 240 UC — 267₽", callback_data="select_240_267"),
-        InlineKeyboardButton("📦 325 UC — 356₽", callback_data="select_325_356"),
-        InlineKeyboardButton("📦 385 UC — 419₽", callback_data="select_385_419"),
-        InlineKeyboardButton("📦 445 UC — 482₽", callback_data="select_445_482"),
-        InlineKeyboardButton("📦 660 UC — 708₽", callback_data="select_660_708"),
-        InlineKeyboardButton("📦 720 UC — 771₽", callback_data="select_720_771"),
-        InlineKeyboardButton("📦 985 UC — 1049₽", callback_data="select_985_1049"),
-        InlineKeyboardButton("📦 1320 UC — 1401₽", callback_data="select_1320_1401"),
-        InlineKeyboardButton("📦 1800 UC — 1905₽", callback_data="select_1800_1905"),
-        InlineKeyboardButton("⬅️ Назад", callback_data="back")
-    )
-    return kb
-
-def confirm_keyboard(order_id, product_name, price_rub, price_stars):
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("✅ Да, оплатить", callback_data=f"confirm_pay_{order_id}"),
-        InlineKeyboardButton("❌ Отмена", callback_data="back")
-    )
-    return kb
-
-def repeat_order_keyboard(order_id, product_amount):
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔄 Повторить заказ", callback_data=f"repeat_{product_amount}"))
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back_to_orders"))
     return kb
 
 def admin_menu():
@@ -179,9 +150,9 @@ def orders_keyboard(orders_list, page=0):
     start = page * 5
     end = start + 5
     for order in orders_list[start:end]:
-        status_emoji = "✅" if order[7] == "✅ Выполнен" else "⏳"
+        status_emoji = "✅" if order[6] == "✅ Выполнен" else "⏳"
         kb.add(InlineKeyboardButton(
-            f"{status_emoji} #{order[0]} | {order[4]} | {order[6]}₽",
+            f"{status_emoji} #{order[0]} | {order[1]} | {order[3]}₽",
             callback_data=f"order_{order[0]}"
         ))
     
@@ -202,13 +173,59 @@ def give_keyboard(order_id):
     kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
     return kb
 
+def user_orders_keyboard(orders_list):
+    kb = InlineKeyboardMarkup(row_width=1)
+    for o in orders_list:
+        status_emoji = "✅" if o[4] == "✅ Выполнен" else "⏳"
+        kb.add(InlineKeyboardButton(
+            f"{status_emoji} #{o[0]} | {o[1]} | {o[3]}₽",
+            callback_data=f"user_order_{o[0]}"
+        ))
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
+    return kb
+
+def repeat_order_keyboard(product_amount):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("🔄 Повторить заказ", callback_data=f"repeat_{product_amount}"))
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="my_orders"))
+    return kb
+
+# ===== ОБРАБОТЧИКИ =====
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
     if await is_banned(message.from_user.id):
         await message.answer("❌ Вы забанены")
         return
     
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\nЗдесь вы можете быстро и удобно купить UC.\n\n👇 Используйте меню ниже:"
+    args = message.get_args()
+    
+    # Обработка заказа с сайта
+    if args and args.startswith("order_"):
+        try:
+            order_id = int(args.split("_")[1])
+            
+            # Здесь можно получить данные заказа из отдельной таблицы
+            # Для простоты создаём новый заказ в боте
+            await message.answer(
+                f"✅ **ВАШ ЗАКАЗ ПРИНЯТ!**\n\n"
+                f"🆔 Номер заказа: #{order_id}\n\n"
+                f"📌 Статус: Ожидает подтверждения оплаты\n\n"
+                f"👨‍💻 Админ проверит оплату и выдаст товар в ближайшее время.\n\n"
+                f"📞 Вопросы: @aakumma",
+                parse_mode="Markdown"
+            )
+            
+            await bot.send_message(
+                ADMIN_ID,
+                f"🆕 **НОВЫЙ ЗАКАЗ С САЙТА**\n🆔 #{order_id}\n👤 @{message.from_user.username or 'Аноним'}",
+                parse_mode="Markdown"
+            )
+            return
+        except:
+            pass
+    
+    # Обычный старт
+    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
     
     await message.answer_photo(
         photo=WELCOME_IMAGE,
@@ -224,262 +241,19 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-@dp.callback_query_handler(lambda c: c.data == "buy_uc")
-async def show_uc(callback: types.CallbackQuery):
-    if await is_banned(callback.from_user.id):
-        await callback.answer("❌ Вы забанены", show_alert=True)
-        return
-    await callback.message.edit_caption(
-        caption="💰 **ВЫБЕРИТЕ КОЛИЧЕСТВО UC:**\n\nОплата рублями через Telegram Stars.",
-        reply_markup=uc_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "back")
-async def back(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\nЗдесь вы можете быстро и удобно купить UC.\n\n👇 Используйте меню ниже:"
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=main_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "show_faq")
-async def show_faq(callback: types.CallbackQuery):
-    cursor.execute("SELECT question, answer FROM faq")
-    faq_list = cursor.fetchall()
-    
-    text = "❓ **ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ**\n\n"
-    for q, a in faq_list:
-        text += f"{q}\n{a}\n\n"
-    
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="Markdown")
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("repeat_"))
-async def repeat_order(callback: types.CallbackQuery):
-    if await is_banned(callback.from_user.id):
-        await callback.answer("❌ Вы забанены", show_alert=True)
-        return
-    
-    product_amount = callback.data.split("_")[1]
-    
-    prices = {
-        "60": 78, "120": 141, "180": 204, "240": 267, "325": 356,
-        "385": 419, "445": 482, "660": 708, "720": 771, "985": 1049,
-        "1320": 1401, "1800": 1905
-    }
-    price_rub = prices.get(product_amount, 78)
-    product_name = f"{product_amount} UC"
-    price_stars = rub_to_stars(price_rub)
-    
-    cursor.execute("""
-        INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        callback.from_user.id,
-        callback.from_user.username or "нет",
-        callback.from_user.first_name or "Пользователь",
-        product_name,
-        product_amount,
-        price_rub,
-        price_stars,
-        "💳 Ожидание оплаты",
-        "UC",
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ))
-    conn.commit()
-    order_id = cursor.lastrowid
-    
-    text = (
-        f"🛒 **ПОДТВЕРЖДЕНИЕ ЗАКАЗА**\n\n"
-        f"📦 Товар: {product_name}\n"
-        f"💰 Сумма: {price_rub}₽\n"
-        f"⭐ Оплата: {price_stars} Telegram Stars\n\n"
-        f"Вы уверены, что хотите приобрести этот товар?"
-    )
-    
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=confirm_keyboard(order_id, product_name, price_rub, price_stars),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "back_to_orders")
-async def back_to_orders(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="📦 **Вернуться к заказам**",
-        reply_markup=admin_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("select_"))
-async def create_order(callback: types.CallbackQuery):
-    if await is_banned(callback.from_user.id):
-        await callback.answer("❌ Вы забанены", show_alert=True)
-        return
-    
-    parts = callback.data.split("_")
-    product_amount = parts[1]
-    price_rub = int(parts[2])
-    
-    product_name = f"{product_amount} UC"
-    price_stars = rub_to_stars(price_rub)
-    
-    user_id = callback.from_user.id
-    username = callback.from_user.username or "нет"
-    first_name = callback.from_user.first_name or "Пользователь"
-    
-    cursor.execute("""
-        INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        user_id,
-        username,
-        first_name,
-        product_name,
-        product_amount,
-        price_rub,
-        price_stars,
-        "💳 Ожидание оплаты",
-        "UC",
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ))
-    conn.commit()
-    order_id = cursor.lastrowid
-    
-    # УВЕДОМЛЕНИЕ АДМИНУ (КЛИКАБЕЛЬНОЕ)
-    user_link = f"tg://user?id={user_id}"
-    await bot.send_message(
-        ADMIN_ID,
-        f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n"
-        f"👤 [{first_name}](tg://user?id={user_id})\n"
-        f"🆔 ID: `{user_id}`\n"
-        f"📦 Товар: {product_name}\n"
-        f"💰 Сумма: {price_rub}₽",
-        parse_mode="Markdown"
-    )
-    
-    text = (
-        f"🛒 **ПОДТВЕРЖДЕНИЕ ЗАКАЗА**\n\n"
-        f"📦 Товар: {product_name}\n"
-        f"💰 Сумма: {price_rub}₽\n"
-        f"⭐ Оплата: {price_stars} Telegram Stars\n\n"
-        f"Вы уверены, что хотите приобрести этот товар?"
-    )
-    
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=confirm_keyboard(order_id, product_name, price_rub, price_stars),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("confirm_pay_"))
-async def confirm_payment(callback: types.CallbackQuery):
-    order_id = int(callback.data.split("_")[2])
-    
-    cursor.execute("SELECT product_name, price_stars, product_amount FROM orders WHERE id=?", (order_id,))
-    order = cursor.fetchone()
-    
-    if order:
-        await bot.send_invoice(
-            chat_id=callback.from_user.id,
-            title=f"🛒 Заказ #{order_id}",
-            description=order[0],
-            payload=f"order_{order_id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label=order[0], amount=order[1])],
-            start_parameter=f"order_{order_id}"
-        )
-        await callback.message.delete()
-    else:
-        await callback.answer("❌ Заказ не найден", show_alert=True)
-    await callback.answer()
-
-@dp.pre_checkout_query_handler(lambda query: True)
-async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
-
-@dp.message_handler(content_types=types.ContentType.SUCCESSFUL_PAYMENT)
-async def successful_payment(message: types.Message):
-    payload = message.successful_payment.invoice_payload
-    order_id = int(payload.split("_")[1])
-    
-    cursor.execute("SELECT product_name, price_rub, price_stars, product_amount FROM orders WHERE id=?", (order_id,))
-    order = cursor.fetchone()
-    
-    if order:
-        cursor.execute("UPDATE orders SET status='✅ Оплачен (ожидает выдачи)' WHERE id=?", (order_id,))
-        conn.commit()
-        
-        product_amount = order[3]
-        code = get_product_code(product_amount)
-        
-        if code:
-            cursor.execute("UPDATE orders SET status='✅ Выполнен' WHERE id=?", (order_id,))
-            conn.commit()
-            await message.answer(
-                f"✅ **ОПЛАТА ПРОШЛА УСПЕШНО!**\n\n"
-                f"📦 Заказ #{order_id}\n"
-                f"🎮 Товар: {order[0]}\n"
-                f"💰 Сумма: {order[1]}₽\n\n"
-                f"🎁 **Код активации:**\n`{code}`\n\n"
-                f"Спасибо за покупку!",
-                parse_mode="Markdown"
-            )
-            await bot.send_message(ADMIN_ID, f"💰 **АВТОВЫДАЧА:**\nЗаказ #{order_id}\n📦 {order[0]}\n🔑 Код выдан автоматически")
-        else:
-            await message.answer(
-                f"✅ **ОПЛАТА ПРОШЛА УСПЕШНО!**\n\n"
-                f"📦 Заказ #{order_id}\n"
-                f"🎮 Товар: {order[0]}\n"
-                f"💰 Сумма: {order[1]}₽\n\n"
-                f"📌 Товар будет выдан в ближайшее время.",
-                parse_mode="Markdown"
-            )
-            user_link = f"tg://user?id={message.from_user.id}"
-            await bot.send_message(
-                ADMIN_ID,
-                f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n"
-                f"👤 [{message.from_user.first_name or 'Пользователь'}]({user_link})\n"
-                f"📦 {order[0]}\n"
-                f"💰 {order[1]}₽\n"
-                f"⭐ {order[2]} Stars",
-                parse_mode="Markdown"
-            )
-    else:
-        await message.answer("❌ Заказ не найден")
-
+# ===== ПОЛЬЗОВАТЕЛЬСКИЕ ФУНКЦИИ =====
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
-    cursor.execute("SELECT id, product_name, product_amount, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
+    cursor.execute("SELECT id, product_name, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
     orders_list = cursor.fetchall()
     
     if not orders_list:
         await callback.answer("❌ У вас нет заказов", show_alert=True)
         return
     
-    kb = InlineKeyboardMarkup(row_width=1)
-    for o in orders_list:
-        status_emoji = "✅" if o[4] == "✅ Выполнен" else "⏳"
-        kb.add(InlineKeyboardButton(
-            f"{status_emoji} #{o[0]} | {o[1]} | {o[3]}₽",
-            callback_data=f"user_order_{o[0]}"
-        ))
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
-    
     await callback.message.edit_caption(
-        caption="📦 **Ваши заказы:**\n\nНажмите на заказ для деталей и повтора.",
-        reply_markup=kb,
+        caption="📦 **Ваши заказы:**\n\nНажмите на заказ для деталей.",
+        reply_markup=user_orders_keyboard(orders_list),
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -504,16 +278,50 @@ async def user_order_detail(callback: types.CallbackQuery):
     if order[4] == "✅ Выполнен":
         await callback.message.edit_caption(
             caption=text,
-            reply_markup=repeat_order_keyboard(order[0], order[2]),
+            reply_markup=repeat_order_keyboard(order[2]),
             parse_mode="Markdown"
         )
     else:
         await callback.message.edit_caption(caption=text, parse_mode="Markdown")
     await callback.answer()
 
+@dp.callback_query_handler(lambda c: c.data.startswith("repeat_"))
+async def repeat_order(callback: types.CallbackQuery):
+    if await is_banned(callback.from_user.id):
+        await callback.answer("❌ Вы забанены", show_alert=True)
+        return
+    
+    await callback.answer("🔄 Перейдите на сайт для оформления нового заказа: https://akuma-shop-x2ly.vercel.app", show_alert=True)
+
+@dp.callback_query_handler(lambda c: c.data == "show_faq")
+async def show_faq(callback: types.CallbackQuery):
+    cursor.execute("SELECT question, answer FROM faq")
+    faq_list = cursor.fetchall()
+    
+    text = "❓ **ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ**\n\n"
+    for q, a in faq_list:
+        text += f"{q}\n{a}\n\n"
+    
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
+    
+    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="Markdown")
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "back")
+async def back(callback: types.CallbackQuery):
+    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    await callback.message.edit_caption(
+        caption=text,
+        reply_markup=main_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ===== АДМИН ПАНЕЛЬ =====
 @dp.callback_query_handler(lambda c: c.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
-    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE status='✅ Оплачен (ожидает выдачи)' OR status='✅ Выполнен'")
+    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE status='✅ Выполнен'")
     completed = cursor.fetchone()
     
     cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders")
@@ -529,7 +337,7 @@ async def admin_stats(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "admin_orders")
 async def admin_orders_list(callback: types.CallbackQuery):
-    cursor.execute("SELECT id, product_name, price_rub, status, username, first_name FROM orders ORDER BY id DESC")
+    cursor.execute("SELECT id, product_name, price_rub, status, username FROM orders ORDER BY id DESC")
     orders_list = cursor.fetchall()
     
     if not orders_list:
@@ -546,7 +354,7 @@ async def admin_orders_list(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data.startswith("orders_page_"))
 async def orders_page(callback: types.CallbackQuery):
     page = int(callback.data.split("_")[2])
-    cursor.execute("SELECT id, product_name, price_rub, status, username, first_name FROM orders ORDER BY id DESC")
+    cursor.execute("SELECT id, product_name, price_rub, status, username FROM orders ORDER BY id DESC")
     orders_list = cursor.fetchall()
     
     await callback.message.edit_caption(
@@ -567,18 +375,11 @@ async def view_order(callback: types.CallbackQuery):
         return
     
     user_id = order[1]
-    username = order[2]
+    user_link = f"tg://user?id={user_id}"
     first_name = order[3] or "Пользователь"
     
-    user_link = f"tg://user?id={user_id}"
-    
-    if username and username != "нет":
-        user_display = f"@{username}"
-    else:
-        user_display = f"[{first_name}]({user_link})"
-    
     text = (f"📋 **ЗАКАЗ #{order[0]}**\n"
-            f"👤 Пользователь: {user_display}\n"
+            f"👤 [{first_name}]({user_link})\n"
             f"🆔 ID: `{user_id}`\n"
             f"📦 Товар: {order[4]}\n"
             f"💰 Цена: {order[5]}₽\n"
@@ -641,7 +442,7 @@ async def admin_add_codes(callback: types.CallbackQuery):
     product_amount = callback.data.split("_")[2]
     admin_state[callback.from_user.id] = f"add_codes_{product_amount}"
     await callback.message.edit_caption(
-        caption=f"🔑 **ДОБАВЛЕНИЕ КОДОВ ДЛЯ {product_amount} UC**\n\nВведите коды (каждый с новой строки):\n\nПример:\n`CODE123456`\n`CODE789012`",
+        caption=f"🔑 **ДОБАВЛЕНИЕ КОДОВ ДЛЯ {product_amount} UC**\n\nВведите коды (каждый с новой строки):",
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -660,7 +461,7 @@ async def admin_edit_faq(callback: types.CallbackQuery):
     faq_id = int(callback.data.split("_")[3])
     admin_state[callback.from_user.id] = f"edit_faq_{faq_id}"
     await callback.message.edit_caption(
-        caption="✏️ **Введите новый вопрос и ответ**\n\nФормат: `вопрос | ответ`\n\nПример:\n`Как долго ждать товар? | Обычно от 1 до 5 минут.`",
+        caption="✏️ **Введите новый вопрос и ответ**\n\nФормат: `вопрос | ответ`",
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -669,7 +470,7 @@ async def admin_edit_faq(callback: types.CallbackQuery):
 async def admin_add_faq(callback: types.CallbackQuery):
     admin_state[callback.from_user.id] = "add_faq"
     await callback.message.edit_caption(
-        caption="➕ **ДОБАВЛЕНИЕ FAQ**\n\nВведите вопрос и ответ\n\nФормат: `вопрос | ответ`\n\nПример:\n`Как оплатить? | Оплата через Telegram Stars.`",
+        caption="➕ **ДОБАВЛЕНИЕ FAQ**\n\nВведите вопрос и ответ\n\nФормат: `вопрос | ответ`",
         parse_mode="Markdown"
     )
     await callback.answer()
@@ -677,7 +478,7 @@ async def admin_add_faq(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "admin_give")
 async def admin_give_menu(callback: types.CallbackQuery):
     await callback.message.edit_caption(
-        caption="🔢 **ВЫДАЧА ТОВАРА**\n\nИспользуйте кнопки в заказах.",
+        caption="✅ **ВЫДАЧА ТОВАРА**\n\nИспользуйте кнопки в заказах.",
         reply_markup=admin_menu(),
         parse_mode="Markdown"
     )
@@ -712,7 +513,7 @@ async def admin_back(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "admin_exit")
 async def admin_exit(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\nЗдесь вы можете быстро и удобно купить UC.\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
@@ -720,6 +521,7 @@ async def admin_exit(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+# ===== АДМИН КОМАНДЫ =====
 @dp.message_handler(commands=['ban'])
 async def ban_command(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -760,6 +562,7 @@ async def unban_command(message: types.Message):
 async def ping(message: types.Message):
     await message.answer("🏓 Bot is alive!")
 
+# ===== СОСТОЯНИЯ ДЛЯ АДМИНА =====
 admin_state = {}
 
 @dp.message_handler()
