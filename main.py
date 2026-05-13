@@ -4,7 +4,7 @@ import sqlite3
 import asyncio
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 API_TOKEN = os.environ.get("BOT_TOKEN")
@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 conn = sqlite3.connect("shop.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# ===== СОЗДАНИЕ ТАБЛИЦ =====
+# ===== ТАБЛИЦЫ =====
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,40 +75,25 @@ conn.commit()
 
 WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
 
-def rub_to_stars(rub):
-    return max(1, round(rub / 1.5))
-
-async def is_banned(user_id):
-    cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
-    return cursor.fetchone() is not None
-
-# ===== ФУНКЦИИ ДЛЯ КОДОВ =====
-def add_product_code(product_amount, code):
-    cursor.execute("INSERT INTO product_codes (product_amount, code) VALUES (?, ?)", (product_amount, code))
-    conn.commit()
-
-def get_product_code(product_amount):
-    cursor.execute("SELECT id, code FROM product_codes WHERE product_amount=? AND is_used=0 LIMIT 1", (product_amount,))
-    result = cursor.fetchone()
-    if result:
-        cursor.execute("UPDATE product_codes SET is_used=1 WHERE id=?", (result[0],))
-        conn.commit()
-        return result[1]
-    return None
-
-def get_codes_count(product_amount):
-    cursor.execute("SELECT COUNT(*) FROM product_codes WHERE product_amount=? AND is_used=0", (product_amount,))
-    return cursor.fetchone()[0]
+# Ссылка на сайт с разделами
+SITE_URL = "https://akuma-shop-x2ly.vercel.app"
 
 # ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("💰 Купить UC", url="https://akuma-shop-x2ly.vercel.app"),
-        InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
+        InlineKeyboardButton("📱 САЙТ (ЛУЧШИЙ ВЫБОР)", url=SITE_URL),
+        InlineKeyboardButton("💰 Купить UC", callback_data="cat_uc"),
+        InlineKeyboardButton("🎉 Купить ПП", callback_data="cat_pp"),
+        InlineKeyboardButton("📦 Подписки", callback_data="cat_prime"),
+        InlineKeyboardButton("🎮 ДРУГИЕ ИГРЫ", callback_data="other_games"),
+        InlineKeyboardButton("📝 Отзывы", url="https://t.me/your_reviews"),
+        InlineKeyboardButton("⭐ ТГ ТОВАРЫ", callback_data="tg_products"),
+        InlineKeyboardButton("🔗 МОИ СОЦСЕТИ", url="https://t.me/your_socials"),
+        InlineKeyboardButton("👗 X-КОСТЮМЫ", callback_data="cat_costumes"),
+        InlineKeyboardButton("📦 МОИ ЗАКАЗЫ", callback_data="my_orders"),
         InlineKeyboardButton("❓ FAQ", callback_data="show_faq"),
-        InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
-        InlineKeyboardButton("🔗 Поддержка", url="https://t.me/your_support")
+        InlineKeyboardButton("🔗 ПОДДЕРЖКА", url="https://t.me/your_support")
     )
     return kb
 
@@ -184,6 +169,28 @@ def user_orders_keyboard(orders_list):
     kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
     return kb
 
+# ===== ФУНКЦИИ ДЛЯ КОДОВ =====
+def add_product_code(product_amount, code):
+    cursor.execute("INSERT INTO product_codes (product_amount, code) VALUES (?, ?)", (product_amount, code))
+    conn.commit()
+
+def get_product_code(product_amount):
+    cursor.execute("SELECT id, code FROM product_codes WHERE product_amount=? AND is_used=0 LIMIT 1", (product_amount,))
+    result = cursor.fetchone()
+    if result:
+        cursor.execute("UPDATE product_codes SET is_used=1 WHERE id=?", (result[0],))
+        conn.commit()
+        return result[1]
+    return None
+
+def get_codes_count(product_amount):
+    cursor.execute("SELECT COUNT(*) FROM product_codes WHERE product_amount=? AND is_used=0", (product_amount,))
+    return cursor.fetchone()[0]
+
+async def is_banned(user_id):
+    cursor.execute("SELECT * FROM banned WHERE user_id=?", (user_id,))
+    return cursor.fetchone() is not None
+
 # ===== ОБРАБОТЧИКИ =====
 @dp.message_handler(commands=['start'])
 async def start_command(message: types.Message):
@@ -191,56 +198,7 @@ async def start_command(message: types.Message):
         await message.answer("❌ Вы забанены")
         return
     
-    args = message.get_args()
-    
-    # === ОБРАБОТКА ЗАКАЗА С САЙТА ===
-    if args and args.startswith("order_"):
-        try:
-            order_id = args.split("_")[1]
-            
-            # Сохраняем заказ в БД бота
-            cursor.execute("""
-                INSERT INTO orders (user_id, username, first_name, product_name, product_amount, price_rub, price_stars, status, category, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                message.from_user.id,
-                message.from_user.username or "нет",
-                message.from_user.first_name or "Пользователь",
-                f"Заказ с сайта #{order_id}",
-                "0",
-                0,
-                0,
-                "⏳ Ожидает подтверждения оплаты",
-                "Сайт",
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            ))
-            conn.commit()
-            bot_order_id = cursor.lastrowid
-            
-            await message.answer(
-                f"✅ **ВАШ ЗАКАЗ ПРИНЯТ!**\n\n"
-                f"🆔 Номер заказа: #{order_id}\n\n"
-                f"📌 Статус: Ожидает подтверждения оплаты\n\n"
-                f"👨‍💻 После проверки оплаты товар будет выдан.\n\n"
-                f"📞 Вопросы: @aakumma",
-                parse_mode="Markdown"
-            )
-            
-            # Уведомляем админа
-            await bot.send_message(
-                ADMIN_ID,
-                f"🆕 **НОВЫЙ ЗАКАЗ С САЙТА**\n"
-                f"🆔 Номер: #{order_id}\n"
-                f"👤 {message.from_user.first_name or 'Пользователь'} (@{message.from_user.username or 'нет'})\n"
-                f"📞 [Написать пользователю](tg://user?id={message.from_user.id})",
-                parse_mode="Markdown"
-            )
-            return
-        except Exception as e:
-            print(f"Ошибка: {e}")
-    
-    # === ОБЫЧНЫЙ СТАРТ ===
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать в магазин NeoN UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
     
     await message.answer_photo(
         photo=WELCOME_IMAGE,
@@ -256,7 +214,35 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== ПОЛЬЗОВАТЕЛЬСКИЕ ФУНКЦИИ =====
+# ===== КНОПКИ ПЕРЕХОДА НА САЙТ В РАЗДЕЛЫ =====
+@dp.callback_query_handler(lambda c: c.data == "cat_uc")
+async def cat_uc(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("🌐 Перейдите на сайт для покупки UC:\n" + SITE_URL + "?section=uc")
+
+@dp.callback_query_handler(lambda c: c.data == "cat_pp")
+async def cat_pp(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("🌐 Перейдите на сайт для покупки ПП (Популярность):\n" + SITE_URL + "?section=pp")
+
+@dp.callback_query_handler(lambda c: c.data == "cat_prime")
+async def cat_prime(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("🌐 Перейдите на сайт для покупки Prime подписок:\n" + SITE_URL + "?section=prime")
+
+@dp.callback_query_handler(lambda c: c.data == "cat_costumes")
+async def cat_costumes(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer("🌐 Перейдите на сайт для покупки X-костюмов:\n" + SITE_URL + "?section=costumes")
+
+@dp.callback_query_handler(lambda c: c.data == "other_games")
+async def other_games(callback: types.CallbackQuery):
+    await callback.answer("🚧 Раздел в разработке", show_alert=True)
+
+@dp.callback_query_handler(lambda c: c.data == "tg_products")
+async def tg_products(callback: types.CallbackQuery):
+    await callback.answer("🚧 Раздел в разработке", show_alert=True)
+
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
     cursor.execute("SELECT id, product_name, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
@@ -310,7 +296,7 @@ async def show_faq(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "back")
 async def back(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать в магазин NeoN UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
@@ -513,7 +499,7 @@ async def admin_back(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "admin_exit")
 async def admin_exit(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже:"
+    text = "👋 **Добро пожаловать в магазин NeoN UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
     await callback.message.edit_caption(
         caption=text,
         reply_markup=main_menu(),
