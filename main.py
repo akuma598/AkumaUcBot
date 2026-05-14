@@ -75,18 +75,14 @@ conn.commit()
 
 WELCOME_IMAGE = "AgACAgIAAxkBAAEpEj5qAAF14VBLMN24S1ngXPeedYLmlrcAAmEYaxs8bQFIsoUcN-o04FMBAAMCAANtAAM7BA"
 
-# Ссылка на сайт с параметрами разделов
-SITE_URL = "https://akuma-shop-x2ly.vercel.app"
-
 # ===== КЛАВИАТУРЫ =====
 def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("💰 Купить UC", url=SITE_URL + "?section=uc"),
-        InlineKeyboardButton("🎉 Купить ПП", url=SITE_URL + "?section=pp"),
-        InlineKeyboardButton("📦 Подписки Prime", url=SITE_URL + "?section=prime"),
-        InlineKeyboardButton("👗 X-костюмы", url=SITE_URL + "?section=costumes"),
-        InlineKeyboardButton("📱 САЙТ", url=SITE_URL),
+        InlineKeyboardButton("💰 Купить UC", callback_data="buy_uc"),
+        InlineKeyboardButton("🎉 Купить ПП", callback_data="buy_pp"),
+        InlineKeyboardButton("📦 Подписки Prime", callback_data="buy_prime"),
+        InlineKeyboardButton("👗 X-костюмы", callback_data="buy_costumes"),
         InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders"),
         InlineKeyboardButton("❓ FAQ", callback_data="show_faq"),
         InlineKeyboardButton("⭐ Отзывы", url="https://t.me/your_reviews"),
@@ -195,7 +191,7 @@ async def start_command(message: types.Message):
         await message.answer("❌ Вы забанены")
         return
     
-    text = "👋 **Добро пожаловать в магазин NeoN UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
+    text = "👋 **Добро пожаловать в магазин Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
     
     await message.answer_photo(
         photo=WELCOME_IMAGE,
@@ -211,7 +207,75 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("🔧 **Админ-панель**", reply_markup=admin_menu(), parse_mode="Markdown")
 
-# ===== ПОЛЬЗОВАТЕЛЬСКИЕ КНОПКИ =====
+# ===== ПОКУПКА ТОВАРОВ =====
+@dp.callback_query_handler(lambda c: c.data == "buy_uc")
+async def buy_uc(callback: types.CallbackQuery):
+    if await is_banned(callback.from_user.id):
+        await callback.answer("❌ Вы забанены", show_alert=True)
+        return
+    
+    await callback.message.answer(
+        "💰 **Выберите количество UC:**\n\n"
+        "60 UC — 87₽\n"
+        "120 UC — 152₽\n"
+        "180 UC — 223₽\n"
+        "240 UC — 293₽\n"
+        "325 UC — 387₽\n"
+        "385 UC — 434₽\n"
+        "445 UC — 482₽\n"
+        "660 UC — 756₽\n"
+        "720 UC — 771₽\n"
+        "985 UC — 1049₽\n"
+        "1320 UC — 1401₽\n"
+        "1800 UC — 1891₽\n"
+        "3850 UC — 3753₽\n"
+        "8100 UC — 7243₽\n"
+        "9900 UC — 9790₽\n\n"
+        "Напишите номер заказа в формате:\n"
+        "`Купить 60 UC` или `Купить 325 UC`",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+@dp.callback_query_handler(lambda c: c.data == "buy_pp")
+async def buy_pp(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "🎉 **Популярность (ПП)**\n\n"
+        "10 000 ПП — 152₽\n"
+        "20 000 ПП — 289₽\n"
+        "30 000 ПП — 424₽\n"
+        "40 000 ПП — 561₽\n"
+        "50 000 ПП — 696₽\n"
+        "60 000 ПП — 833₽\n\n"
+        "Напишите: `Купить 10000 ПП`",
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query_handler(lambda c: c.data == "buy_prime")
+async def buy_prime(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "📦 **Prime подписки**\n\n"
+        "Prime (1 месяц) — 125₽\n"
+        "Prime (3 месяца) — 318₽\n"
+        "Prime (6 месяцев) — 550₽\n"
+        "Prime (12 месяцев) — 1027₽\n\n"
+        "Напишите: `Купить Prime 1 месяц`",
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query_handler(lambda c: c.data == "buy_costumes")
+async def buy_costumes(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "👗 **X-костюмы**\n\n"
+        "🐦‍⬛ Ворон — 4500₽\n"
+        "🔥 Феникс — 4500₽\n\n"
+        "Напишите: `Купить Ворон`",
+        parse_mode="Markdown"
+    )
+
 @dp.callback_query_handler(lambda c: c.data == "my_orders")
 async def my_orders(callback: types.CallbackQuery):
     cursor.execute("SELECT id, product_name, price_rub, status, created_at FROM orders WHERE user_id=? ORDER BY id DESC", (callback.from_user.id,))
@@ -221,31 +285,10 @@ async def my_orders(callback: types.CallbackQuery):
         await callback.answer("❌ У вас нет заказов", show_alert=True)
         return
     
-    await callback.message.edit_caption(
-        caption="📦 **Ваши заказы:**\n\nНажмите на заказ для деталей.",
-        reply_markup=user_orders_keyboard(orders_list),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("user_order_"))
-async def user_order_detail(callback: types.CallbackQuery):
-    order_id = int(callback.data.split("_")[2])
-    
-    cursor.execute("SELECT id, product_name, product_amount, price_rub, status, created_at FROM orders WHERE id=?", (order_id,))
-    order = cursor.fetchone()
-    
-    if not order:
-        await callback.answer("❌ Заказ не найден", show_alert=True)
-        return
-    
-    text = (f"📋 **ЗАКАЗ #{order[0]}**\n"
-            f"📦 Товар: {order[1]}\n"
-            f"💰 Цена: {order[3]}₽\n"
-            f"📅 Дата: {order[5]}\n"
-            f"📌 Статус: {order[4]}")
-    
-    await callback.message.edit_caption(caption=text, parse_mode="Markdown")
+    text = "📦 **Ваши заказы:**\n\n"
+    for o in orders_list:
+        text += f"🆔 #{o[0]} | {o[1]} | {o[2]}₽ | {o[3]}\n📅 {o[4]}\n\n"
+    await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query_handler(lambda c: c.data == "show_faq")
@@ -257,226 +300,100 @@ async def show_faq(callback: types.CallbackQuery):
     for q, a in faq_list:
         text += f"{q}\n{a}\n\n"
     
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="Markdown")
+    await callback.message.answer(text, parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query_handler(lambda c: c.data == "back")
 async def back(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в магазин NeoN UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=main_menu(),
-        parse_mode="Markdown"
-    )
+    await callback.message.delete()
     await callback.answer()
 
-# ===== АДМИН ПАНЕЛЬ =====
-@dp.callback_query_handler(lambda c: c.data == "admin_stats")
-async def admin_stats(callback: types.CallbackQuery):
-    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE status='✅ Выполнен'")
-    completed = cursor.fetchone()
+# ===== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ (ЗАКАЗЫ) =====
+@dp.message_handler()
+async def handle_order(message: types.Message):
+    user_id = message.from_user.id
+    username = message.from_user.username or "нет"
+    first_name = message.from_user.first_name or "Пользователь"
+    text = message.text.lower()
     
-    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders")
-    total = cursor.fetchone()
-    
-    text = (f"📊 **СТАТИСТИКА**\n\n"
-            f"✅ Выполнено заказов: {completed[0] or 0}\n"
-            f"💰 Выручка: {completed[1] or 0}₽\n\n"
-            f"📦 Всего заказов: {total[0] or 0}\n"
-            f"💸 Общая сумма: {total[1] or 0}₽")
-    await callback.message.edit_caption(caption=text, reply_markup=admin_menu(), parse_mode="Markdown")
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_orders")
-async def admin_orders_list(callback: types.CallbackQuery):
-    cursor.execute("SELECT id, product_name, price_rub, status, username FROM orders ORDER BY id DESC")
-    orders_list = cursor.fetchall()
-    
-    if not orders_list:
-        await callback.answer("❌ Нет заказов", show_alert=True)
-        return
-    
-    await callback.message.edit_caption(
-        caption="📦 **СПИСОК ЗАКАЗОВ**",
-        reply_markup=orders_keyboard(orders_list, 0),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("orders_page_"))
-async def orders_page(callback: types.CallbackQuery):
-    page = int(callback.data.split("_")[2])
-    cursor.execute("SELECT id, product_name, price_rub, status, username FROM orders ORDER BY id DESC")
-    orders_list = cursor.fetchall()
-    
-    await callback.message.edit_caption(
-        caption="📦 **СПИСОК ЗАКАЗОВ**",
-        reply_markup=orders_keyboard(orders_list, page),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("order_"))
-async def view_order(callback: types.CallbackQuery):
-    order_id = int(callback.data.split("_")[1])
-    cursor.execute("SELECT id, user_id, username, first_name, product_name, price_rub, status, created_at FROM orders WHERE id=?", (order_id,))
-    order = cursor.fetchone()
-    
-    if not order:
-        await callback.answer("❌ Заказ не найден", show_alert=True)
-        return
-    
-    user_id = order[1]
-    user_link = f"tg://user?id={user_id}"
-    first_name = order[3] or "Пользователь"
-    
-    text = (f"📋 **ЗАКАЗ #{order[0]}**\n"
-            f"👤 [{first_name}]({user_link})\n"
-            f"🆔 ID: `{user_id}`\n"
-            f"📦 Товар: {order[4]}\n"
-            f"💰 Цена: {order[5]}₽\n"
-            f"📅 Дата: {order[7]}\n"
-            f"📌 Статус: {order[6]}")
-    
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardButton("✅ Выдать товар", callback_data=f"give_{order[0]}"))
-    kb.add(InlineKeyboardButton("💬 Написать", url=user_link))
-    kb.add(InlineKeyboardButton("🔙 Назад", callback_data="admin_back"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="Markdown")
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("give_"))
-async def give_item(callback: types.CallbackQuery):
-    order_id = int(callback.data.split("_")[1])
-    
-    cursor.execute("SELECT user_id, product_name, product_amount FROM orders WHERE id=?", (order_id,))
-    order = cursor.fetchone()
-    
-    if not order:
-        await callback.answer("❌ Заказ не найден", show_alert=True)
-        return
-    
-    code = get_product_code(order[2])
-    
-    if code:
-        cursor.execute("UPDATE orders SET status='✅ Выполнен' WHERE id=?", (order_id,))
-        conn.commit()
-        await callback.message.edit_caption(
-            caption=f"✅ Товар выдан! Заказ #{order_id} выполнен.\n\n🎁 Код: `{code}`",
-            reply_markup=admin_menu(),
-            parse_mode="Markdown"
-        )
-        await bot.send_message(order[0], f"✅ **ВАШ ЗАКАЗ #{order_id} ВЫПОЛНЕН!**\n📦 Товар: {order[1]}\n\n🎁 **Код активации:**\n`{code}`\n\nСпасибо за покупку!", parse_mode="Markdown")
-    else:
-        cursor.execute("UPDATE orders SET status='✅ Выполнен' WHERE id=?", (order_id,))
-        conn.commit()
-        await callback.message.edit_caption(
-            caption=f"✅ Товар выдан! Заказ #{order_id} выполнен.",
-            reply_markup=admin_menu()
-        )
-        await bot.send_message(order[0], f"✅ **ВАШ ЗАКАЗ #{order_id} ВЫПОЛНЕН!**\n📦 Товар: {order[1]}\n\nСпасибо за покупку!", parse_mode="Markdown")
-    
-    await callback.answer()
-    await bot.send_message(ADMIN_ID, f"✅ Заказ #{order_id} выполнен.")
-
-@dp.callback_query_handler(lambda c: c.data == "admin_codes")
-async def admin_codes(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="🔑 **УПРАВЛЕНИЕ КОДАМИ ТОВАРОВ**\n\nВыберите товар для добавления кодов:",
-        reply_markup=admin_codes_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("admin_codes_"))
-async def admin_add_codes(callback: types.CallbackQuery):
-    product_amount = callback.data.split("_")[2]
-    admin_state[callback.from_user.id] = f"add_codes_{product_amount}"
-    await callback.message.edit_caption(
-        caption=f"🔑 **ДОБАВЛЕНИЕ КОДОВ ДЛЯ {product_amount} UC**\n\nВведите коды (каждый с новой строки):",
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_faq")
-async def admin_faq(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="❓ **УПРАВЛЕНИЕ FAQ**\n\nВыберите вопрос для редактирования:",
-        reply_markup=admin_faq_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("admin_edit_faq_"))
-async def admin_edit_faq(callback: types.CallbackQuery):
-    faq_id = int(callback.data.split("_")[3])
-    admin_state[callback.from_user.id] = f"edit_faq_{faq_id}"
-    await callback.message.edit_caption(
-        caption="✏️ **Введите новый вопрос и ответ**\n\nФормат: `вопрос | ответ`",
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_add_faq")
-async def admin_add_faq(callback: types.CallbackQuery):
-    admin_state[callback.from_user.id] = "add_faq"
-    await callback.message.edit_caption(
-        caption="➕ **ДОБАВЛЕНИЕ FAQ**\n\nВведите вопрос и ответ\n\nФормат: `вопрос | ответ`",
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_give")
-async def admin_give_menu(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="✅ **ВЫДАЧА ТОВАРА**\n\nИспользуйте кнопки в заказах.",
-        reply_markup=admin_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_ban")
-async def admin_ban_menu(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="🚫 **БАН ПОЛЬЗОВАТЕЛЯ**\n\nВведите: `/ban user_id`",
-        reply_markup=admin_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_unban")
-async def admin_unban_menu(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="🔓 **РАЗБАН**\n\nВведите: `/unban user_id`",
-        reply_markup=admin_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_back")
-async def admin_back(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="🔧 **Админ-панель**",
-        reply_markup=admin_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "admin_exit")
-async def admin_exit(callback: types.CallbackQuery):
-    text = "👋 **Добро пожаловать в магазин NeoN UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=main_menu(),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
+    # Парсим заказ
+    if text.startswith("купить"):
+        parts = text.split()
+        if len(parts) >= 2:
+            product_name = " ".join(parts[1:])
+            
+            # Цены на товары
+            prices = {
+                "60 uc": 87, "120 uc": 152, "180 uc": 223, "240 uc": 293,
+                "325 uc": 387, "385 uc": 434, "445 uc": 482, "660 uc": 756,
+                "720 uc": 771, "985 uc": 1049, "1320 uc": 1401, "1800 uc": 1891,
+                "3850 uc": 3753, "8100 uc": 7243, "9900 uc": 9790,
+                "10000 пп": 152, "20000 пп": 289, "30000 пп": 424,
+                "40000 пп": 561, "50000 пп": 696, "60000 пп": 833,
+                "prime 1 месяц": 125, "prime 3 месяца": 318,
+                "prime 6 месяцев": 550, "prime 12 месяцев": 1027,
+                "ворон": 4500, "феникс": 4500
+            }
+            
+            price = None
+            for key, val in prices.items():
+                if key in product_name:
+                    price = val
+                    product_name = key
+                    break
+            
+            if price:
+                cursor.execute("""
+                    INSERT INTO orders (user_id, username, first_name, product_name, price_rub, status, category, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, username, first_name, product_name, price, "⏳ Ожидает оплаты", "UC", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                conn.commit()
+                order_id = cursor.lastrowid
+                
+                # Уведомление админу
+                user_link = f"tg://user?id={user_id}"
+                admin_text = f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n👤 [{first_name}]({user_link})\n📦 {product_name}\n💰 {price}₽"
+                await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
+                
+                await message.answer(
+                    f"✅ **ЗАКАЗ #{order_id} ПРИНЯТ!**\n\n"
+                    f"📦 Товар: {product_name}\n"
+                    f"💰 Сумма: {price}₽\n\n"
+                    f"💳 **Реквизиты для оплаты:**\n"
+                    f"Карта: **** **** **** 1234\n\n"
+                    f"📌 После оплаты напишите сюда номер заказа: #{order_id}",
+                    parse_mode="Markdown"
+                )
+            else:
+                await message.answer("❌ Товар не найден. Напишите `Купить 60 UC`", parse_mode="Markdown")
 
 # ===== АДМИН КОМАНДЫ =====
+@dp.message_handler(commands=['give'])
+async def give_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    parts = message.text.split()
+    if len(parts) != 3:
+        await message.answer("❌ Формат: `/give order_id код`", parse_mode="Markdown")
+        return
+    
+    try:
+        order_id = int(parts[1])
+        code = parts[2]
+        
+        cursor.execute("UPDATE orders SET status='✅ Выполнен' WHERE id=?", (order_id,))
+        conn.commit()
+        
+        cursor.execute("SELECT user_id FROM orders WHERE id=?", (order_id,))
+        user = cursor.fetchone()
+        if user:
+            await bot.send_message(user[0], f"✅ **ВАШ ЗАКАЗ #{order_id} ВЫПОЛНЕН!**\n\n🎁 Код: `{code}`", parse_mode="Markdown")
+        
+        await message.answer(f"✅ Заказ #{order_id} выполнен, код отправлен")
+    except:
+        await message.answer("❌ Ошибка!")
+
 @dp.message_handler(commands=['ban'])
 async def ban_command(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -513,63 +430,47 @@ async def unban_command(message: types.Message):
     except:
         await message.answer("❌ Ошибка!")
 
+@dp.message_handler(commands=['stats'])
+async def stats_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    cursor.execute("SELECT COUNT(*), SUM(price_rub) FROM orders WHERE status='✅ Выполнен'")
+    completed = cursor.fetchone()
+    
+    cursor.execute("SELECT COUNT(*) FROM orders")
+    total = cursor.fetchone()
+    
+    await message.answer(
+        f"📊 **СТАТИСТИКА**\n\n"
+        f"✅ Выполнено заказов: {completed[0] or 0}\n"
+        f"💰 Выручка: {completed[1] or 0}₽\n\n"
+        f"📦 Всего заказов: {total[0] or 0}",
+        parse_mode="Markdown"
+    )
+
+@dp.message_handler(commands=['orders'])
+async def orders_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    cursor.execute("SELECT id, product_name, price_rub, status, username, first_name FROM orders ORDER BY id DESC LIMIT 10")
+    orders = cursor.fetchall()
+    
+    if not orders:
+        await message.answer("📭 Нет заказов")
+        return
+    
+    text = "📋 **ПОСЛЕДНИЕ ЗАКАЗЫ:**\n\n"
+    for o in orders:
+        status_emoji = "✅" if o[3] == "✅ Выполнен" else "⏳"
+        text += f"{status_emoji} #{o[0]} | {o[1]} | {o[2]}₽ | {o[4] or o[5]}\n"
+    
+    await message.answer(text, parse_mode="Markdown")
+
 @dp.message_handler(commands=['ping'])
 async def ping(message: types.Message):
     await message.answer("🏓 Bot is alive!")
-
-# ===== СОСТОЯНИЯ ДЛЯ АДМИНА =====
-admin_state = {}
-
-@dp.message_handler()
-async def handle_admin_text(message: types.Message):
-    user_id = str(message.from_user.id)
-    
-    if user_id not in admin_state:
-        return
-    
-    state = admin_state[user_id]
-    
-    if state.startswith("add_codes_"):
-        product_amount = state.split("_")[2]
-        codes_list = message.text.strip().split("\n")
-        added = 0
-        for code in codes_list:
-            if code.strip():
-                add_product_code(product_amount, code.strip())
-                added += 1
-        await message.answer(f"✅ Добавлено {added} кодов для {product_amount} UC")
-        del admin_state[user_id]
-        await message.answer("🔑 Управление кодами:", reply_markup=admin_codes_menu())
-        return
-    
-    if state.startswith("edit_faq_"):
-        faq_id = int(state.split("_")[2])
-        parts = message.text.split("|")
-        if len(parts) == 2:
-            question = parts[0].strip()
-            answer = parts[1].strip()
-            cursor.execute("UPDATE faq SET question=?, answer=? WHERE id=?", (question, answer, faq_id))
-            conn.commit()
-            await message.answer("✅ FAQ обновлён!")
-        else:
-            await message.answer("❌ Неверный формат! Используйте: `вопрос | ответ`")
-        del admin_state[user_id]
-        await message.answer("❓ Управление FAQ:", reply_markup=admin_faq_menu())
-        return
-    
-    if state == "add_faq":
-        parts = message.text.split("|")
-        if len(parts) == 2:
-            question = parts[0].strip()
-            answer = parts[1].strip()
-            cursor.execute("INSERT INTO faq (question, answer) VALUES (?, ?)", (question, answer))
-            conn.commit()
-            await message.answer("✅ FAQ добавлен!")
-        else:
-            await message.answer("❌ Неверный формат! Используйте: `вопрос | ответ`")
-        del admin_state[user_id]
-        await message.answer("❓ Управление FAQ:", reply_markup=admin_faq_menu())
-        return
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
