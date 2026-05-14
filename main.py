@@ -327,6 +327,12 @@ async def back(callback: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "cancel_pay")
 async def cancel_pay(callback: types.CallbackQuery):
+    # Удаляем заказ из БД
+    order_id = int(callback.data.split("_")[2]) if len(callback.data.split("_")) > 2 else None
+    if order_id:
+        cursor.execute("DELETE FROM orders WHERE id=?", (order_id,))
+        conn.commit()
+    
     text = "👋 **Добро пожаловать в магазин Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
     await callback.message.edit_caption(
         caption=text,
@@ -403,13 +409,28 @@ async def process_payment(callback: types.CallbackQuery):
     
     order_id = int(callback.data.split("_")[2])
     
-    cursor.execute("SELECT product_name, price_rub, price_stars FROM orders WHERE id=?", (order_id,))
+    cursor.execute("SELECT product_name, price_rub, price_stars, user_id, first_name, username, product_amount, category FROM orders WHERE id=?", (order_id,))
     order = cursor.fetchone()
     
     if order:
         cursor.execute("UPDATE orders SET status='💳 Ожидание оплаты' WHERE id=?", (order_id,))
         conn.commit()
         
+        # ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ АДМИНУ О НОВОМ ЗАКАЗЕ
+        user_link = f"tg://user?id={callback.from_user.id}"
+        admin_text = (
+            f"🆕 **НОВЫЙ ЗАКАЗ #{order_id}**\n\n"
+            f"👤 [{order[3] or 'Пользователь'}]({user_link})\n"
+            f"👤 Username: @{callback.from_user.username or 'нет'}\n"
+            f"🆔 ID: `{callback.from_user.id}`\n"
+            f"📦 Товар: {order[0]}\n"
+            f"💰 Сумма: {order[1]} ₽\n"
+            f"⭐ Stars: {order[2]}\n"
+            f"📅 Время: {datetime.now().strftime('%H:%M:%S')}"
+        )
+        await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
+        
+        # Отправляем счёт на оплату
         await bot.send_invoice(
             chat_id=callback.from_user.id,
             title=f"🛒 Заказ #{order_id}",
@@ -435,12 +456,17 @@ async def successful_payment(message: types.Message):
     payload = message.successful_payment.invoice_payload
     order_id = int(payload.split("_")[1])
     
-    cursor.execute("SELECT product_name, price_rub, price_stars, product_amount, category FROM orders WHERE id=?", (order_id,))
+    cursor.execute("SELECT product_name, price_rub, price_stars, product_amount, category, user_id, first_name FROM orders WHERE id=?", (order_id,))
     order = cursor.fetchone()
     
     if order:
         cursor.execute("UPDATE orders SET status='✅ Оплачен' WHERE id=?", (order_id,))
         conn.commit()
+        
+        # Уведомление админу об оплате
+        user_link = f"tg://user?id={order[5]}"
+        admin_text = f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n👤 [{order[6] or 'Пользователь'}]({user_link})\n📦 {order[0]}\n💰 {order[1]}₽\n⭐ {order[2]} Stars"
+        await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
         
         # Проверяем автовыдачу
         code = get_product_code(order[3]) if order[4] == "uc" else None
@@ -457,7 +483,7 @@ async def successful_payment(message: types.Message):
                 f"Спасибо за покупку!",
                 parse_mode="Markdown"
             )
-            await bot.send_message(ADMIN_ID, f"💰 **АВТОВЫДАЧА:**\nЗаказ #{order_id}\n📦 {order[0]}\n🔑 Код выдан автоматически")
+            await bot.send_message(ADMIN_ID, f"🎁 **АВТОВЫДАЧА:**\nЗаказ #{order_id}\n🔑 Код: `{code}`", parse_mode="Markdown")
         else:
             await message.answer(
                 f"✅ **ОПЛАТА ПРОШЛА УСПЕШНО!**\n\n"
@@ -467,10 +493,6 @@ async def successful_payment(message: types.Message):
                 f"📌 Товар будет выдан в ближайшее время.",
                 parse_mode="Markdown"
             )
-            # Уведомление админу
-            user_link = f"tg://user?id={message.from_user.id}"
-            admin_text = f"💰 **ОПЛАЧЕН ЗАКАЗ #{order_id}**\n👤 [{message.from_user.first_name}]({user_link})\n📦 {order[0]}\n💰 {order[1]}₽\n⭐ {order[2]} Stars"
-            await bot.send_message(ADMIN_ID, admin_text, parse_mode="Markdown")
     else:
         await message.answer("❌ Заказ не найден")
 
