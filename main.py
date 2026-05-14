@@ -114,7 +114,7 @@ def admin_menu():
 
 def admin_codes_menu():
     kb = InlineKeyboardMarkup(row_width=1)
-    amounts = ["60", "120", "180", "240", "325", "385", "445", "660", "720", "985", "1320", "1800"]
+    amounts = ["60", "120", "180", "240", "325", "385", "445", "660", "720", "985", "1320", "1800", "3850", "8100", "9900"]
     for amount in amounts:
         count = get_codes_count(amount)
         kb.add(InlineKeyboardButton(f"📦 {amount} UC — {count} кодов", callback_data=f"admin_codes_{amount}"))
@@ -170,6 +170,14 @@ def user_orders_keyboard(orders_list):
     kb.add(InlineKeyboardButton("🔙 Назад", callback_data="back"))
     return kb
 
+def confirm_keyboard(order_id, product_name, price_rub, price_stars):
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ ПОДТВЕРДИТЬ И ОПЛАТИТЬ", callback_data=f"confirm_pay_{order_id}"),
+        InlineKeyboardButton("❌ ОТМЕНА", callback_data="cancel_pay")
+    )
+    return kb
+
 # ===== ФУНКЦИИ ДЛЯ КОДОВ =====
 def add_product_code(product_amount, code):
     cursor.execute("INSERT INTO product_codes (product_amount, code) VALUES (?, ?)", (product_amount, code))
@@ -220,21 +228,21 @@ async def buy_uc(callback: types.CallbackQuery):
     
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("60 UC — 87₽", callback_data="uc_60_87"),
-        InlineKeyboardButton("120 UC — 152₽", callback_data="uc_120_152"),
-        InlineKeyboardButton("180 UC — 223₽", callback_data="uc_180_223"),
-        InlineKeyboardButton("240 UC — 293₽", callback_data="uc_240_293"),
-        InlineKeyboardButton("325 UC — 387₽", callback_data="uc_325_387"),
-        InlineKeyboardButton("385 UC — 434₽", callback_data="uc_385_434"),
-        InlineKeyboardButton("445 UC — 482₽", callback_data="uc_445_482"),
-        InlineKeyboardButton("660 UC — 756₽", callback_data="uc_660_756"),
-        InlineKeyboardButton("720 UC — 771₽", callback_data="uc_720_771"),
-        InlineKeyboardButton("985 UC — 1049₽", callback_data="uc_985_1049"),
-        InlineKeyboardButton("1320 UC — 1401₽", callback_data="uc_1320_1401"),
-        InlineKeyboardButton("1800 UC — 1891₽", callback_data="uc_1800_1891"),
-        InlineKeyboardButton("3850 UC — 3753₽", callback_data="uc_3850_3753"),
-        InlineKeyboardButton("8100 UC — 7243₽", callback_data="uc_8100_7243"),
-        InlineKeyboardButton("9900 UC — 9790₽", callback_data="uc_9900_9790"),
+        InlineKeyboardButton("60 UC — 87₽", callback_data="select_uc_60_87"),
+        InlineKeyboardButton("120 UC — 152₽", callback_data="select_uc_120_152"),
+        InlineKeyboardButton("180 UC — 223₽", callback_data="select_uc_180_223"),
+        InlineKeyboardButton("240 UC — 293₽", callback_data="select_uc_240_293"),
+        InlineKeyboardButton("325 UC — 387₽", callback_data="select_uc_325_387"),
+        InlineKeyboardButton("385 UC — 434₽", callback_data="select_uc_385_434"),
+        InlineKeyboardButton("445 UC — 482₽", callback_data="select_uc_445_482"),
+        InlineKeyboardButton("660 UC — 756₽", callback_data="select_uc_660_756"),
+        InlineKeyboardButton("720 UC — 771₽", callback_data="select_uc_720_771"),
+        InlineKeyboardButton("985 UC — 1049₽", callback_data="select_uc_985_1049"),
+        InlineKeyboardButton("1320 UC — 1401₽", callback_data="select_uc_1320_1401"),
+        InlineKeyboardButton("1800 UC — 1891₽", callback_data="select_uc_1800_1891"),
+        InlineKeyboardButton("3850 UC — 3753₽", callback_data="select_uc_3850_3753"),
+        InlineKeyboardButton("8100 UC — 7243₽", callback_data="select_uc_8100_7243"),
+        InlineKeyboardButton("9900 UC — 9790₽", callback_data="select_uc_9900_9790"),
         InlineKeyboardButton("🔙 Назад", callback_data="back")
     )
     await callback.message.edit_caption(
@@ -252,12 +260,12 @@ async def buy_pp(callback: types.CallbackQuery):
     
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
-        InlineKeyboardButton("10 000 ПП — 152₽", callback_data="pp_10000_152"),
-        InlineKeyboardButton("20 000 ПП — 289₽", callback_data="pp_20000_289"),
-        InlineKeyboardButton("30 000 ПП — 424₽", callback_data="pp_30000_424"),
-        InlineKeyboardButton("40 000 ПП — 561₽", callback_data="pp_40000_561"),
-        InlineKeyboardButton("50 000 ПП — 696₽", callback_data="pp_50000_696"),
-        InlineKeyboardButton("60 000 ПП — 833₽", callback_data="pp_60000_833"),
+        InlineKeyboardButton("10 000 ПП — 152₽", callback_data="select_pp_10000_152"),
+        InlineKeyboardButton("20 000 ПП — 289₽", callback_data="select_pp_20000_289"),
+        InlineKeyboardButton("30 000 ПП — 424₽", callback_data="select_pp_30000_424"),
+        InlineKeyboardButton("40 000 ПП — 561₽", callback_data="select_pp_40000_561"),
+        InlineKeyboardButton("50 000 ПП — 696₽", callback_data="select_pp_50000_696"),
+        InlineKeyboardButton("60 000 ПП — 833₽", callback_data="select_pp_60000_833"),
         InlineKeyboardButton("🔙 Назад", callback_data="back")
     )
     await callback.message.edit_caption(
@@ -275,10 +283,10 @@ async def buy_prime(callback: types.CallbackQuery):
     
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
-        InlineKeyboardButton("Prime (1 месяц) — 125₽", callback_data="prime_1m_125"),
-        InlineKeyboardButton("Prime (3 месяца) — 318₽", callback_data="prime_3m_318"),
-        InlineKeyboardButton("Prime (6 месяцев) — 550₽", callback_data="prime_6m_550"),
-        InlineKeyboardButton("Prime (12 месяцев) — 1027₽", callback_data="prime_12m_1027"),
+        InlineKeyboardButton("Prime (1 месяц) — 125₽", callback_data="select_prime_1m_125"),
+        InlineKeyboardButton("Prime (3 месяца) — 318₽", callback_data="select_prime_3m_318"),
+        InlineKeyboardButton("Prime (6 месяцев) — 550₽", callback_data="select_prime_6m_550"),
+        InlineKeyboardButton("Prime (12 месяцев) — 1027₽", callback_data="select_prime_12m_1027"),
         InlineKeyboardButton("🔙 Назад", callback_data="back")
     )
     await callback.message.edit_caption(
@@ -296,8 +304,8 @@ async def buy_costumes(callback: types.CallbackQuery):
     
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
-        InlineKeyboardButton("🐦‍⬛ Ворон — 4500₽", callback_data="costume_1_4500"),
-        InlineKeyboardButton("🔥 Феникс — 4500₽", callback_data="costume_2_4500"),
+        InlineKeyboardButton("🐦‍⬛ Ворон — 4500₽", callback_data="select_costume_1_4500"),
+        InlineKeyboardButton("🔥 Феникс — 4500₽", callback_data="select_costume_2_4500"),
         InlineKeyboardButton("🔙 Назад", callback_data="back")
     )
     await callback.message.edit_caption(
@@ -317,28 +325,37 @@ async def back(callback: types.CallbackQuery):
     )
     await callback.answer()
 
-# ===== ОПЛАТА TELEGRAM STARS =====
-@dp.callback_query_handler(lambda c: c.data.startswith("uc_") or c.data.startswith("pp_") or c.data.startswith("prime_") or c.data.startswith("costume_"))
-async def create_payment(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == "cancel_pay")
+async def cancel_pay(callback: types.CallbackQuery):
+    text = "👋 **Добро пожаловать в магазин Akuma UC BOT!**\n\n🟢 Мы работаем 24/7\n\n👇 Используйте меню ниже для навигации:"
+    await callback.message.edit_caption(
+        caption=text,
+        reply_markup=main_menu(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ===== ПОДТВЕРЖДЕНИЕ ЗАКАЗА =====
+@dp.callback_query_handler(lambda c: c.data.startswith("select_"))
+async def confirm_order(callback: types.CallbackQuery):
     if await is_banned(callback.from_user.id):
         await callback.answer("❌ Вы забанены", show_alert=True)
         return
     
     parts = callback.data.split("_")
-    product_id = parts[0]
-    amount = parts[1]
-    price_rub = int(parts[2])
+    product_type = parts[1]
+    product_id = parts[2]
+    price_rub = int(parts[3])
     
     # Определяем название товара
     product_names = {
-        "uc": f"{amount} UC",
-        "pp": f"{amount} ПП",
-        "prime": f"Prime {amount}",
-        "costume": f"X-костюм {amount}"
+        "uc": f"{product_id} UC",
+        "pp": f"{product_id} ПП",
+        "prime": f"Prime {product_id}",
+        "costume": f"X-костюм {product_id}"
     }
     
-    category = product_id
-    product_name = product_names.get(product_id, "Товар")
+    product_name = product_names.get(product_type, "Товар")
     price_stars = rub_to_stars(price_rub)
     
     # Сохраняем заказ
@@ -350,28 +367,62 @@ async def create_payment(callback: types.CallbackQuery):
         callback.from_user.username or "нет",
         callback.from_user.first_name or "Пользователь",
         product_name,
-        amount,
+        product_id,
         price_rub,
         price_stars,
-        "💳 Ожидание оплаты",
-        category,
+        "⏳ Ожидание подтверждения",
+        product_type,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ))
     conn.commit()
     order_id = cursor.lastrowid
     
-    # Отправляем счёт в Telegram Stars
-    await bot.send_invoice(
-        chat_id=callback.from_user.id,
-        title=f"🛒 Заказ #{order_id}",
-        description=f"{product_name} - {price_rub}₽",
-        payload=f"order_{order_id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label=product_name, amount=price_stars)],
-        start_parameter=f"order_{order_id}"
+    # Показываем окно подтверждения
+    text = (
+        f"🛒 **ПОДТВЕРЖДЕНИЕ ЗАКАЗА**\n\n"
+        f"📦 Товар: {product_name}\n"
+        f"💰 Сумма: {price_rub} ₽\n"
+        f"⭐ Оплата: {price_stars} Telegram Stars\n"
+        f"🆔 Номер заказа: #{order_id}\n\n"
+        f"Вы уверены, что хотите приобрести этот товар?"
     )
     
+    await callback.message.edit_caption(
+        caption=text,
+        reply_markup=confirm_keyboard(order_id, product_name, price_rub, price_stars),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# ===== ОПЛАТА TELEGRAM STARS =====
+@dp.callback_query_handler(lambda c: c.data.startswith("confirm_pay_"))
+async def process_payment(callback: types.CallbackQuery):
+    if await is_banned(callback.from_user.id):
+        await callback.answer("❌ Вы забанены", show_alert=True)
+        return
+    
+    order_id = int(callback.data.split("_")[2])
+    
+    cursor.execute("SELECT product_name, price_rub, price_stars FROM orders WHERE id=?", (order_id,))
+    order = cursor.fetchone()
+    
+    if order:
+        cursor.execute("UPDATE orders SET status='💳 Ожидание оплаты' WHERE id=?", (order_id,))
+        conn.commit()
+        
+        await bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title=f"🛒 Заказ #{order_id}",
+            description=order[0],
+            payload=f"order_{order_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=order[0], amount=order[2])],
+            start_parameter=f"order_{order_id}"
+        )
+        await callback.message.delete()
+    else:
+        await callback.answer("❌ Заказ не найден", show_alert=True)
     await callback.answer()
 
 # ===== ПРОВЕРКА ОПЛАТЫ =====
