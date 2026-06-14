@@ -51,18 +51,6 @@ def get_balance(user_id):
 def update_balance(user_id, amount):
     cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
     conn.commit()
-    if amount > 0:
-        cursor.execute("UPDATE users SET total_won = total_won + ? WHERE user_id=?", (amount, user_id))
-        cursor.execute("SELECT level, exp FROM users WHERE user_id=?", (user_id,))
-        level, exp = cursor.fetchone()
-        new_exp = exp + amount // 10
-        if new_exp >= 1000:
-            new_level = level + new_exp // 1000
-            new_exp = new_exp % 1000
-            cursor.execute("UPDATE users SET level=?, exp=? WHERE user_id=?", (new_level, new_exp, user_id))
-        else:
-            cursor.execute("UPDATE users SET exp=? WHERE user_id=?", (new_exp, user_id))
-    conn.commit()
 
 def register_user(user_id, username, first_name, ref_code=None):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
@@ -95,9 +83,8 @@ HTML = '''<!DOCTYPE html>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: linear-gradient(135deg, #0a0a2a, #1a1a3a);
-            font-family: system-ui, -apple-system, sans-serif;
+            font-family: system-ui, sans-serif;
             color: white;
-            min-height: 100vh;
             padding: 20px;
         }
         .container { max-width: 500px; margin: 0 auto; }
@@ -116,11 +103,10 @@ HTML = '''<!DOCTYPE html>
             text-align: center;
             margin: 15px 0;
             cursor: pointer;
-            transition: 0.2s;
         }
-        .game-card:active { transform: scale(0.97); background: rgba(255,255,255,0.2); }
+        .game-card:active { background: rgba(255,255,255,0.2); }
         .game-icon { font-size: 48px; }
-        .game-name { font-size: 24px; margin-top: 10px; font-weight: bold; }
+        .game-name { font-size: 20px; margin-top: 10px; font-weight: bold; }
         .back-btn {
             background: rgba(255,255,255,0.1);
             border: none;
@@ -141,10 +127,9 @@ HTML = '''<!DOCTYPE html>
         .bet-btn {
             background: rgba(255,255,255,0.15);
             border: none;
-            padding: 12px 18px;
+            padding: 10px 15px;
             color: white;
-            border-radius: 12px;
-            font-size: 16px;
+            border-radius: 10px;
             cursor: pointer;
         }
         .action-btn {
@@ -155,7 +140,6 @@ HTML = '''<!DOCTYPE html>
             border-radius: 12px;
             width: 100%;
             margin: 10px 0;
-            font-size: 16px;
             font-weight: bold;
             cursor: pointer;
         }
@@ -168,7 +152,6 @@ HTML = '''<!DOCTYPE html>
             border-radius: 10px;
             width: 100%;
             margin: 10px 0;
-            font-size: 16px;
         }
         .field {
             display: grid;
@@ -179,13 +162,12 @@ HTML = '''<!DOCTYPE html>
         .cell {
             background: rgba(255,255,255,0.1);
             border-radius: 12px;
-            width: 60px;
-            height: 60px;
+            width: 55px;
+            height: 55px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
-            font-weight: bold;
+            font-size: 18px;
             cursor: pointer;
         }
         .cell.opened { background: rgba(0,255,0,0.3); }
@@ -196,7 +178,6 @@ HTML = '''<!DOCTYPE html>
             padding: 15px;
             margin-top: 20px;
         }
-        .players-list h3 { margin-bottom: 10px; font-size: 16px; }
         .player-item {
             display: flex;
             justify-content: space-between;
@@ -211,23 +192,9 @@ HTML = '''<!DOCTYPE html>
             border: none;
             border-radius: 10px;
             color: white;
-            font-size: 16px;
             cursor: pointer;
         }
         .size-btn.active { background: linear-gradient(135deg, #667eea, #764ba2); }
-        .referral-box {
-            background: rgba(255,255,255,0.05);
-            border-radius: 15px;
-            padding: 20px;
-            text-align: center;
-        }
-        .referral-code {
-            background: rgba(0,0,0,0.3);
-            padding: 10px;
-            border-radius: 10px;
-            margin: 15px 0;
-            word-break: break-all;
-        }
     </style>
 </head>
 <body>
@@ -260,7 +227,6 @@ HTML = '''<!DOCTYPE html>
         
         async function renderMain() {
             let balance = await getBalance();
-            let levelData = await api(`/api/profile?user_id=${userId}`);
             document.getElementById('app').innerHTML = `
                 <div class="balance">⭐ <span>${balance}</span></div>
                 <div class="game-card" onclick="startCrash()">
@@ -271,10 +237,6 @@ HTML = '''<!DOCTYPE html>
                     <div class="game-icon">💣</div>
                     <div class="game-name">BOMBS</div>
                 </div>
-                <div class="game-card" onclick="openReferral()">
-                    <div class="game-icon">👥</div>
-                    <div class="game-name">РЕФЕРАЛЫ</div>
-                </div>
                 <div class="game-card" onclick="openProfile()">
                     <div class="game-icon">👤</div>
                     <div class="game-name">ПРОФИЛЬ</div>
@@ -283,33 +245,13 @@ HTML = '''<!DOCTYPE html>
         }
         
         async function openProfile() {
-            let data = await api(`/api/profile?user_id=${userId}`);
             let balance = await getBalance();
             document.getElementById('app').innerHTML = `
                 <button class="back-btn" onclick="renderMain()">← Назад</button>
                 <div class="balance">⭐ <span>${balance}</span></div>
-                <div class="referral-box">
+                <div style="background:rgba(255,255,255,0.05); border-radius:20px; padding:20px; text-align:center">
                     <div style="font-size:48px">👤</div>
-                    <div style="font-size:20px; font-weight:bold">${data.first_name}</div>
-                    <div>🎚️ Уровень: <b>${data.level}</b></div>
-                    <div>📊 Опыт: ${data.exp}/1000</div>
-                    <div>🏆 Выиграно: <b>${data.total_won}</b> ⭐</div>
-                </div>
-            `;
-        }
-        
-        async function openReferral() {
-            let data = await api(`/api/referral?user_id=${userId}`);
-            let link = `https://t.me/${tg.initDataUnsafe?.user?.username || 'zenvira_gift_bot'}?start=ref_${data.code}`;
-            document.getElementById('app').innerHTML = `
-                <button class="back-btn" onclick="renderMain()">← Назад</button>
-                <div class="referral-box">
-                    <div style="font-size:48px">👥</div>
-                    <div style="font-size:20px; font-weight:bold">РЕФЕРАЛЫ</div>
-                    <div>👥 Приглашено: <b>${data.count}</b></div>
-                    <div>💰 Заработано: <b>${data.earnings}</b> ⭐</div>
-                    <div class="referral-code"><code>${link}</code></div>
-                    <button class="action-btn" onclick="tg.openTelegramLink('https://t.me/share/url?url=${encodeURIComponent(link)}&text=Присоединяйся к Zenvira Gift!')">📤 ПОДЕЛИТЬСЯ</button>
+                    <div>⭐ Баланс: <b>${balance}</b></div>
                 </div>
             `;
         }
@@ -336,9 +278,9 @@ HTML = '''<!DOCTYPE html>
                     <button class="bet-btn" onclick="setBet(1000)">1000</button>
                 </div>
                 <input type="number" id="betInput" placeholder="Своя сумма" min="10" max="10000">
-                <button class="action-btn" id="betBtn" onclick="placeBet()">🚀 Сделать ставку</button>
-                <button class="action-btn cashout-btn" id="cashoutBtn" onclick="cashOut()" style="display:none">💰 ЗАБРАТЬ</button>
-                <div class="players-list" id="players"><h3>👥 Игроки</h3></div>
+                <button class="action-btn" id="betBtn" onclick="placeBet()">Сделать ставку</button>
+                <button class="action-btn cashout-btn" id="cashoutBtn" onclick="cashOut()" style="display:none">ЗАБРАТЬ</button>
+                <div class="players-list" id="players"><h3>Игроки</h3></div>
             `;
         }
         
@@ -351,7 +293,7 @@ HTML = '''<!DOCTYPE html>
                     <button class="size-btn ${fieldSize===3?'active':''}" onclick="setFieldSize(3)">3x3</button>
                     <button class="size-btn ${fieldSize===5?'active':''}" onclick="setFieldSize(5)">5x5</button>
                 </div>
-                <div>💣 Бомб: <input type="range" id="bombsRange" min="1" max="${fieldSize===3?8:24}" value="${bombsCount}" onchange="updateBombs()"> <span id="bombsVal">${bombsCount}</span></div>
+                <div>Бомб: <input type="range" id="bombsRange" min="1" max="${fieldSize===3?8:24}" value="${bombsCount}" onchange="updateBombs()"> <span id="bombsVal">${bombsCount}</span></div>
                 <div class="bet-buttons">
                     <button class="bet-btn" onclick="setBet(10)">10</button>
                     <button class="bet-btn" onclick="setBet(50)">50</button>
@@ -360,11 +302,11 @@ HTML = '''<!DOCTYPE html>
                     <button class="bet-btn" onclick="setBet(500)">500</button>
                     <button class="bet-btn" onclick="setBet(1000)">1000</button>
                 </div>
-                <button class="action-btn" onclick="startBombsGame()">💣 Начать игру</button>
+                <button class="action-btn" onclick="startBombsGame()">Начать игру</button>
                 <div id="gameField" class="field" style="display:none"></div>
                 <div id="gameInfo" style="display:none; margin-top:20px">
-                    <div style="font-size:24px; text-align:center">📈 Множитель: <span id="gameMultiplier">1.00</span>x</div>
-                    <button class="action-btn cashout-btn" onclick="cashOutBombs()">💰 ЗАБРАТЬ</button>
+                    <div style="font-size:24px; text-align:center">Множитель: <span id="gameMultiplier">1.00</span>x</div>
+                    <button class="action-btn cashout-btn" onclick="cashOutBombs()">ЗАБРАТЬ</button>
                 </div>
             `;
         }
@@ -376,16 +318,16 @@ HTML = '''<!DOCTYPE html>
         async function placeBet() {
             let amount = currentBet || parseInt(document.getElementById('betInput')?.value || 0);
             if(amount < 10 || amount > 10000) {
-                tg.showPopup({title:'Ошибка', message:'Ставка от 10 до 10000 ⭐'});
+                tg.showPopup({title:'Ошибка', message:'Ставка от 10 до 10000'});
                 return;
             }
             let data = await api('/api/crash/bet', {user_id: userId, amount: amount});
             if(data.success) {
                 inGame = true;
-                tg.showPopup({title:'Успех', message:`Ставка ${amount}⭐ принята!`});
+                tg.showPopup({title:'Успех', message:`Ставка ${amount} принята!`});
                 renderCrash();
             } else {
-                tg.showPopup({title:'Ошибка', message:data.error || 'Не удалось сделать ставку'});
+                tg.showPopup({title:'Ошибка', message:data.error});
             }
         }
         
@@ -393,14 +335,14 @@ HTML = '''<!DOCTYPE html>
             let data = await api('/api/crash/cashout', {user_id: userId});
             if(data.success) {
                 inGame = false;
-                tg.showPopup({title:'Успех', message:`Ты забрал ${data.win}⭐!`});
+                tg.showPopup({title:'Успех', message:`Забрал ${data.win}!`});
                 renderCrash();
             }
         }
         
         async function startBombsGame() {
             if(!currentBet) {
-                tg.showPopup({title:'Ошибка', message:'Выберите сумму ставки!'});
+                tg.showPopup({title:'Ошибка', message:'Выберите ставку!'});
                 return;
             }
             let data = await api('/api/bombs/start', {
@@ -420,7 +362,7 @@ HTML = '''<!DOCTYPE html>
         function renderField() {
             let field = document.getElementById('gameField');
             field.style.display = 'grid';
-            field.style.gridTemplateColumns = `repeat(${game.field_size}, 60px)`;
+            field.style.gridTemplateColumns = `repeat(${game.field_size}, 55px)`;
             field.innerHTML = '';
             for(let i=0; i<game.total_cells; i++) {
                 let cell = document.createElement('div');
@@ -445,10 +387,10 @@ HTML = '''<!DOCTYPE html>
                 game = data.game;
                 renderField();
                 if(game.status === 'lost') {
-                    tg.showPopup({title:'💥 БОМБА!', message:`Ты проиграл ${currentBet}⭐`});
+                    tg.showPopup({title:'БОМБА!', message:`Проиграл ${currentBet}`});
                     resetBombs();
                 } else if(game.status === 'won') {
-                    tg.showPopup({title:'🎉 ПОБЕДА!', message:`Ты выиграл ${Math.floor(currentBet * game.multiplier)}⭐!`});
+                    tg.showPopup({title:'ПОБЕДА!', message:`Выиграл ${Math.floor(currentBet * game.multiplier)}!`});
                     resetBombs();
                 }
             }
@@ -457,7 +399,7 @@ HTML = '''<!DOCTYPE html>
         async function cashOutBombs() {
             let data = await api('/api/bombs/cashout', {game_id: game.game_id});
             if(data.success) {
-                tg.showPopup({title:'✅', message:`Ты забрал ${data.win}⭐!`});
+                tg.showPopup({title:'Успех', message:`Забрал ${data.win}!`});
                 resetBombs();
             }
         }
@@ -484,12 +426,9 @@ HTML = '''<!DOCTYPE html>
                 }
                 let playersDiv = document.getElementById('players');
                 if(playersDiv) {
-                    playersDiv.innerHTML = '<h3>👥 Игроки</h3>';
+                    playersDiv.innerHTML = '<h3>Игроки</h3>';
                     for(let [id, bet] of Object.entries(data.bets)) {
-                        playersDiv.innerHTML += `<div class="player-item"><span>👤 ${bet.user_name}</span><span>${bet.amount}⭐</span><span>${bet.multiplier.toFixed(2)}x</span></div>`;
-                    }
-                    if(Object.keys(data.bets).length === 0) {
-                        playersDiv.innerHTML += '<div style="text-align:center; opacity:0.5">Нет активных ставок</div>';
+                        playersDiv.innerHTML += `<div class="player-item"><span>${bet.user_name}</span><span>${bet.amount}</span><span>${bet.multiplier.toFixed(2)}x</span></div>`;
                     }
                 }
             }, 500);
@@ -518,12 +457,6 @@ async def crash_loop():
             await asyncio.sleep(0.1)
             if random.random() < 0.10:
                 crash_running = False
-                for uid in crash_bets:
-                    if crash_bets[uid]['status'] == 'active':
-                        crash_bets[uid]['status'] = 'lost'
-                crash_last_results.append({'multiplier': crash_multiplier})
-                if len(crash_last_results) > 20:
-                    crash_last_results.pop(0)
                 crash_timer = 8
         elif crash_timer > 0:
             crash_timer -= 1
@@ -535,7 +468,7 @@ async def crash_loop():
             crash_bets = {}
         await asyncio.sleep(0.1)
 
-# ========== BOMBS GAME ==========
+# ========== BOMBS ==========
 bombs_games = {}
 
 class BombsGameObj:
@@ -583,24 +516,6 @@ def index():
 def balance():
     uid = int(request.args.get('user_id'))
     return {'balance': get_balance(uid)}
-
-@app.route('/api/profile')
-def profile():
-    uid = int(request.args.get('user_id'))
-    cursor.execute("SELECT first_name, level, exp, total_won FROM users WHERE user_id=?", (uid,))
-    row = cursor.fetchone()
-    if row:
-        return {'first_name': row[0], 'level': row[1], 'exp': row[2] % 1000, 'total_won': row[3]}
-    return {'first_name': 'User', 'level': 1, 'exp': 0, 'total_won': 0}
-
-@app.route('/api/referral')
-def referral():
-    uid = int(request.args.get('user_id'))
-    cursor.execute("SELECT referral_code, referral_earnings FROM users WHERE user_id=?", (uid,))
-    row = cursor.fetchone()
-    cursor.execute("SELECT COUNT(*) FROM users WHERE referrer_id=?", (uid,))
-    count = cursor.fetchone()[0]
-    return {'code': row[0] if row else '', 'earnings': row[1] if row else 0, 'count': count}
 
 @app.route('/api/crash/state')
 def crash_state():
@@ -724,7 +639,15 @@ async def start_cmd(message: types.Message):
     
     register_user(user.id, user.username, user.first_name, ref)
     
-    webapp_url = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'your-domain.railway.app')}"
+    # Получаем домен Railway
+    railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+    if not railway_domain:
+        # Если переменной нет, используем localhost для теста
+        railway_domain = "your-domain.railway.app"
+    
+    webapp_url = f"https://{railway_domain}"
+    
+    print(f"🌐 WebApp URL: {webapp_url}")
     
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -758,7 +681,6 @@ async def on_startup(dp):
     print("=" * 50)
     print("✅ БОТ Zenvira Gift ЗАПУЩЕН!")
     print("🎮 Игры: CRASH, BOMBS")
-    print("📢 Канал: https://t.me/zenviragift")
     print("=" * 50)
 
 if __name__ == "__main__":
