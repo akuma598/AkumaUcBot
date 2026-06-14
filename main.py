@@ -4,334 +4,627 @@ import random
 import asyncio
 import time
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode, WebAppInfo
 from aiogram.utils import executor
-from flask import Flask
+from flask import Flask, request, jsonify
 from threading import Thread
 
-# ===== ТОКЕН =====
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("❌ ОШИБКА: BOT_TOKEN не найден!")
-    print("Добавьте переменную BOT_TOKEN в Railway -> Variables")
+    print("❌ BOT_TOKEN не найден!")
     exit(1)
-
-print(f"✅ Токен загружен: {BOT_TOKEN[:10]}...")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
+app = Flask(__name__)
 
-# ID фотографии
-PHOTO_ID = "AgACAgIAAxkBAAEqq-5qLrP5zJdyZj2-Jxl3Fy-zs7ekuQACRxlrGwHycEmgNUvLeaY5XgEAAwIAA3MAAzwE"
-
-# ===== БАЗА ДАННЫХ =====
+# ==================== БАЗА ДАННЫХ ====================
 conn = sqlite3.connect("zenvira.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Таблица пользователей
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     username TEXT,
     first_name TEXT,
-    balance_stars INTEGER DEFAULT 500,
-    balance_coins INTEGER DEFAULT 0,
+    balance INTEGER DEFAULT 500,
     level INTEGER DEFAULT 1,
     exp INTEGER DEFAULT 0,
     total_won INTEGER DEFAULT 0,
-    total_spent INTEGER DEFAULT 0,
-    gifts_sent INTEGER DEFAULT 0,
-    gifts_received INTEGER DEFAULT 0,
     referral_code TEXT UNIQUE,
     referrer_id INTEGER,
-    referral_earnings INTEGER DEFAULT 0,
-    created_at TEXT,
-    last_active TEXT
-)
-""")
-
-# Таблица инвентаря
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS inventory (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    gift_id TEXT,
-    gift_name TEXT,
-    gift_value INTEGER,
-    gift_type TEXT,
-    gift_rarity TEXT,
-    is_used INTEGER DEFAULT 0,
-    obtained_at TEXT
-)
-""")
-
-# Таблица магазина
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS shop_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    description TEXT,
-    price_stars INTEGER,
-    price_coins INTEGER,
-    gift_value INTEGER,
-    gift_rarity TEXT,
-    is_limited INTEGER DEFAULT 0,
-    stock INTEGER DEFAULT -1
-)
-""")
-
-# Таблица достижений
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS achievements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    description TEXT,
-    required_value INTEGER,
-    reward_stars INTEGER,
-    icon TEXT
-)
-""")
-
-# Таблица полученных достижений
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS user_achievements (
-    user_id INTEGER,
-    achievement_id INTEGER,
-    unlocked_at TEXT,
-    PRIMARY KEY (user_id, achievement_id)
-)
-""")
-
-# Таблица розыгрышей
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS raffles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    week_number INTEGER,
-    prize_pool INTEGER DEFAULT 0,
-    winner_id INTEGER,
-    winner_amount INTEGER,
-    ended_at TEXT,
     created_at TEXT
 )
 """)
-
-# Таблица билетов розыгрыша
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS raffle_tickets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raffle_id INTEGER,
-    user_id INTEGER,
-    ticket_count INTEGER DEFAULT 1,
-    created_at TEXT
-)
-""")
-
-# Таблица ставок Crash
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS crash_bets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    amount INTEGER,
-    multiplier REAL,
-    win_amount INTEGER,
-    status TEXT,
-    bet_time TEXT
-)
-""")
-
 conn.commit()
 
-# ===== ДОБАВЛЯЕМ СТАНДАРТНЫЕ ДАННЫЕ =====
-
-# Товары в магазин
-cursor.execute("SELECT COUNT(*) FROM shop_items")
-if cursor.fetchone()[0] == 0:
-    items = [
-        ("🌹 Цветок", "Красивый цветок", 50, 0, 50, "common"),
-        ("❤️ Сердце", "Тёплое сердечко", 100, 0, 100, "common"),
-        ("⭐ Звезда", "Сияющая звезда", 250, 0, 250, "rare"),
-        ("👑 Корона", "Королевская корона", 500, 0, 500, "rare"),
-        ("💎 Алмаз", "Бриллиант", 1000, 0, 1000, "epic"),
-        ("🚀 Ракета", "Космическая ракета", 2500, 0, 2500, "epic"),
-    ]
-    for item in items:
-        cursor.execute("INSERT INTO shop_items (name, description, price_stars, price_coins, gift_value, gift_rarity, is_limited, stock) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", item)
-    conn.commit()
-
-# Достижения
-cursor.execute("SELECT COUNT(*) FROM achievements")
-if cursor.fetchone()[0] == 0:
-    achievements = [
-        ("🎁 Первый подарок", "Отправить первый подарок", 1, 100, "🎁"),
-        ("⭐ Звёздный коллекционер", "Получить 1000 Stars", 1000, 500, "⭐"),
-        ("👑 Король подарков", "Отправить 100 подарков", 100, 5000, "👑"),
-        ("🏆 Легенда", "Достичь 10 уровня", 10, 10000, "🏆"),
-    ]
-    for ach in achievements:
-        cursor.execute("INSERT INTO achievements (name, description, required_value, reward_stars, icon) VALUES (?, ?, ?, ?, ?)", ach)
-    conn.commit()
-
-# Текущий розыгрыш
-cursor.execute("SELECT COUNT(*) FROM raffles WHERE ended_at IS NULL")
-if cursor.fetchone()[0] == 0:
-    week_num = datetime.now().isocalendar()[1]
-    cursor.execute("INSERT INTO raffles (week_number, prize_pool, created_at) VALUES (?, ?, ?)", 
-                   (week_num, 5000, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit()
-
-conn.commit()
-print("✅ База данных настроена")
-
-# ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
 def get_balance(user_id):
-    cursor.execute("SELECT balance_stars FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
     result = cursor.fetchone()
     return result[0] if result else 500
 
 def update_balance(user_id, amount):
-    cursor.execute("UPDATE users SET balance_stars = balance_stars + ? WHERE user_id=?", (amount, user_id))
-    conn.commit()
-    if amount > 0:
-        cursor.execute("UPDATE users SET total_won = total_won + ? WHERE user_id=?", (amount, user_id))
-        cursor.execute("SELECT level, exp FROM users WHERE user_id=?", (user_id,))
-        level, exp = cursor.fetchone()
-        new_exp = exp + amount // 10
-        if new_exp >= 1000:
-            new_level = level + new_exp // 1000
-            new_exp = new_exp % 1000
-            cursor.execute("UPDATE users SET level=?, exp=? WHERE user_id=?", (new_level, new_exp, user_id))
-        else:
-            cursor.execute("UPDATE users SET exp=? WHERE user_id=?", (new_exp, user_id))
+    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
     conn.commit()
 
-def register_user(user_id, username, first_name, ref_code=None):
+def register_user(user_id, username, first_name):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     if not cursor.fetchone():
         code = secrets.token_urlsafe(8)
-        referrer = None
-        if ref_code:
-            cursor.execute("SELECT user_id FROM users WHERE referral_code=?", (ref_code,))
-            referrer = cursor.fetchone()
-        
-        cursor.execute("""
-            INSERT INTO users (user_id, username, first_name, referral_code, referrer_id, created_at, last_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, username or "Anonymous", first_name or "User", code, 
-              referrer[0] if referrer else None, datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-              datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        
-        if referrer:
-            update_balance(referrer[0], 100)
-            cursor.execute("UPDATE users SET referral_earnings = referral_earnings + 100 WHERE user_id=?", (referrer[0],))
+        cursor.execute("INSERT INTO users (user_id, username, first_name, referral_code, created_at) VALUES (?, ?, ?, ?, ?)",
+                       (user_id, username or "Anonymous", first_name or "User", code, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
 
-def add_to_inventory(user_id, gift_name, gift_value, gift_type, gift_rarity="common"):
-    gift_id = f"gift_{int(time.time())}_{random.randint(1000,9999)}"
-    cursor.execute("""
-        INSERT INTO inventory (user_id, gift_id, gift_name, gift_value, gift_type, gift_rarity, obtained_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, gift_id, gift_name, gift_value, gift_type, gift_rarity, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit()
+# ==================== HTML MINI APP ====================
+HTML_PAGE = '''
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Zenvira Gift</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            background: linear-gradient(135deg, #0a0a2a 0%, #1a1a3a 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 500px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .logo { font-size: 60px; }
+        h1 { font-size: 28px; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .balance-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .balance-label { font-size: 14px; opacity: 0.8; }
+        .balance-amount { font-size: 48px; font-weight: bold; color: #ffd700; }
+        .games-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; }
+        .game-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .game-card:active { transform: scale(0.95); background: rgba(255,255,255,0.2); }
+        .game-icon { font-size: 48px; margin-bottom: 10px; }
+        .game-name { font-size: 20px; font-weight: bold; }
+        .game-desc { font-size: 12px; opacity: 0.7; margin-top: 5px; }
+        .btn-back {
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .multiplier {
+            font-size: 72px;
+            font-weight: bold;
+            text-align: center;
+            color: #ffd700;
+            margin: 20px 0;
+            font-family: monospace;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .status.flying { background: rgba(0,255,0,0.2); color: #0f0; }
+        .status.waiting { background: rgba(255,165,0,0.2); color: #ffa500; }
+        .bet-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; justify-content: center; }
+        .bet-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            padding: 10px 15px;
+            color: white;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .bet-input input {
+            width: 100%;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            color: white;
+            font-size: 16px;
+            margin: 10px 0;
+        }
+        .btn-bet, .btn-cashout, .btn-start {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .btn-bet { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+        .btn-cashout { background: linear-gradient(135deg, #f093fb, #f5576c); color: white; }
+        .btn-start { background: linear-gradient(135deg, #4facfe, #00f2fe); color: white; }
+        .game-field { display: grid; gap: 8px; margin: 20px 0; justify-content: center; }
+        .cell {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 12px;
+            width: 55px;
+            height: 55px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .cell:active { transform: scale(0.95); background: rgba(255,255,255,0.2); }
+        .cell.opened { background: rgba(0,255,0,0.2); }
+        .cell.bomb { background: rgba(255,0,0,0.3); }
+        .players-list, .history {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .players-list h3, .history h3 { font-size: 16px; margin-bottom: 10px; }
+        .player-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .history-item {
+            display: inline-block;
+            background: rgba(255,255,255,0.1);
+            padding: 5px 10px;
+            border-radius: 8px;
+            margin: 5px;
+            font-size: 14px;
+        }
+        .field-size { display: flex; gap: 10px; margin: 20px 0; }
+        .size-btn {
+            flex: 1;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .size-btn.active { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .bombs-count { margin: 20px 0; }
+        .bombs-count input { width: 100%; margin: 10px 0; }
+        .game-info { text-align: center; margin: 15px 0; }
+        .info-text { font-size: 18px; margin: 10px 0; }
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .menu-item {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 15px 5px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .menu-item:active { background: rgba(255,255,255,0.15); }
+        .menu-icon { font-size: 28px; margin-bottom: 5px; }
+        .menu-name { font-size: 11px; }
+    </style>
+</head>
+<body>
+    <div class="container" id="app"></div>
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.enableClosingConfirmation();
+        
+        let userId = tg.initDataUnsafe?.user?.id;
+        let userName = tg.initDataUnsafe?.user?.first_name || 'Guest';
+        let currentView = 'main';
+        let crashInterval = null;
+        let currentBet = 0;
+        let isActive = false;
+        let game = null;
+        let fieldSize = 3;
+        let bombsCount = 3;
+        
+        async function api(endpoint, data = null) {
+            const options = { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
+            if (data) options.body = JSON.stringify(data);
+            const response = await fetch(endpoint, options);
+            return response.json();
+        }
+        
+        async function getBalance() {
+            const data = await api(`/api/balance?user_id=${userId}`);
+            return data.balance;
+        }
+        
+        function render() {
+            if (currentView === 'main') renderMain();
+            else if (currentView === 'crash') renderCrash();
+            else if (currentView === 'bombs') renderBombs();
+            else if (currentView === 'profile') renderProfile();
+            else if (currentView === 'referral') renderReferral();
+            else if (currentView === 'inventory') renderInventory();
+        }
+        
+        async function renderMain() {
+            const balance = await getBalance();
+            document.getElementById('app').innerHTML = `
+                <div class="header"><div class="logo">✨</div><h1>Zenvira Gift</h1></div>
+                <div class="balance-card">
+                    <div class="balance-label">⭐ Баланс</div>
+                    <div class="balance-amount">${balance}</div>
+                </div>
+                <div class="games-grid">
+                    <div class="game-card" onclick="startGame('crash')">
+                        <div class="game-icon">🚀</div>
+                        <div class="game-name">CRASH</div>
+                        <div class="game-desc">Ракетный множитель</div>
+                    </div>
+                    <div class="game-card" onclick="startGame('bombs')">
+                        <div class="game-icon">💣</div>
+                        <div class="game-name">BOMBS</div>
+                        <div class="game-desc">Найди бомбы</div>
+                    </div>
+                </div>
+                <div class="menu-grid">
+                    <div class="menu-item" onclick="openSection('profile')"><div class="menu-icon">👤</div><div class="menu-name">Профиль</div></div>
+                    <div class="menu-item" onclick="openSection('referral')"><div class="menu-icon">👥</div><div class="menu-name">Рефералы</div></div>
+                    <div class="menu-item" onclick="openSection('inventory')"><div class="menu-icon">🎒</div><div class="menu-name">Инвентарь</div></div>
+                </div>
+            `;
+        }
+        
+        async function renderCrash() {
+            const balance = await getBalance();
+            document.getElementById('app').innerHTML = `
+                <button class="btn-back" onclick="goBack()">← Назад</button>
+                <div class="multiplier" id="multiplier">1.00x</div>
+                <div class="status" id="status">🟢 ЛЕТИТ!</div>
+                <div class="balance-card">⭐ Баланс: ${balance}</div>
+                <div class="bet-buttons">
+                    ${[10,50,100,250,500,1000].map(v => `<button class="bet-btn" onclick="setBet(${v})">${v}</button>`).join('')}
+                </div>
+                <div class="bet-input"><input type="number" id="betAmount" placeholder="Своя сумма" min="10" max="10000"></div>
+                <button class="btn-bet" id="betBtn" onclick="placeBet()">🚀 Сделать ставку</button>
+                <button class="btn-cashout" id="cashoutBtn" onclick="cashOut()" style="display:none">💰 ЗАБРАТЬ</button>
+                <div class="players-list"><h3>👥 Игроки</h3><div id="players"></div></div>
+                <div class="history"><h3>📊 История</h3><div id="history"></div></div>
+            `;
+            startCrashUpdates();
+        }
+        
+        async function renderBombs() {
+            const balance = await getBalance();
+            document.getElementById('app').innerHTML = `
+                <button class="btn-back" onclick="goBack()">← Назад</button>
+                <div class="balance-card">⭐ Баланс: ${balance}</div>
+                <div class="field-size">
+                    <button class="size-btn ${fieldSize===3?'active':''}" onclick="setFieldSize(3)">3x3</button>
+                    <button class="size-btn ${fieldSize===5?'active':''}" onclick="setFieldSize(5)">5x5</button>
+                </div>
+                <div class="bombs-count">
+                    <label>💣 Бомб: </label>
+                    <input type="range" id="bombsRange" min="1" max="${fieldSize===3?8:24}" value="${bombsCount}" onchange="updateBombs()">
+                    <span id="bombsValue">${bombsCount}</span>
+                </div>
+                <div class="bet-buttons">
+                    ${[10,50,100,250,500,1000].map(v => `<button class="bet-btn" onclick="setBet(${v})">${v}</button>`).join('')}
+                </div>
+                <button class="btn-start" onclick="startBombsGame()">💣 Начать игру</button>
+                <div id="gameField" class="game-field" style="display:none"></div>
+                <div id="gameInfo" class="game-info" style="display:none">
+                    <div class="info-text">📈 Множитель: <span id="multiplier">1.00</span>x</div>
+                    <div class="info-text">💰 Выигрыш: <span id="winAmount">0</span> ⭐</div>
+                    <button class="btn-cashout" onclick="cashOutBombs()">💰 ЗАБРАТЬ</button>
+                </div>
+            `;
+        }
+        
+        async function renderProfile() {
+            const data = await api(`/api/profile?user_id=${userId}`);
+            const balance = await getBalance();
+            document.getElementById('app').innerHTML = `
+                <button class="btn-back" onclick="goBack()">← Назад</button>
+                <div class="balance-card">⭐ Баланс: ${balance}</div>
+                <div style="background:rgba(255,255,255,0.05); border-radius:20px; padding:20px; text-align:center">
+                    <div style="font-size:64px">👤</div>
+                    <div style="font-size:24px; font-weight:bold">${data.first_name}</div>
+                    <div style="opacity:0.7">ID: ${userId}</div>
+                    <div style="margin-top:15px">🎚️ Уровень: <b>${data.level}</b></div>
+                    <div>📊 Опыт: ${data.exp}/1000</div>
+                    <div>🏆 Всего выиграно: <b>${data.total_won}</b> ⭐</div>
+                    <div>📅 Регистрация: ${data.created_at}</div>
+                </div>
+            `;
+        }
+        
+        async function renderReferral() {
+            const data = await api(`/api/referral?user_id=${userId}`);
+            const link = `https://t.me/${tg.initDataUnsafe?.user?.username ? tg.initDataUnsafe.user.username : 'zenvira_gift_bot'}?start=ref_${data.code}`;
+            document.getElementById('app').innerHTML = `
+                <button class="btn-back" onclick="goBack()">← Назад</button>
+                <div style="background:rgba(255,255,255,0.05); border-radius:20px; padding:20px; text-align:center">
+                    <div style="font-size:48px">👥</div>
+                    <div style="font-size:20px; font-weight:bold">Рефералы</div>
+                    <div>Приглашено: <b>${data.count}</b></div>
+                    <div>Заработано: <b>${data.earnings}</b> ⭐</div>
+                    <div style="margin-top:15px; background:rgba(0,0,0,0.3); padding:10px; border-radius:10px">
+                        <code style="word-break:break-all">${link}</code>
+                    </div>
+                    <button class="btn-bet" style="margin-top:15px" onclick="tg.openTelegramLink('https://t.me/share/url?url=${encodeURIComponent(link)}&text=Присоединяйся к Zenvira Gift!')">📤 Поделиться</button>
+                </div>
+            `;
+        }
+        
+        async function renderInventory() {
+            const data = await api(`/api/inventory?user_id=${userId}`);
+            const balance = await getBalance();
+            document.getElementById('app').innerHTML = `
+                <button class="btn-back" onclick="goBack()">← Назад</button>
+                <div class="balance-card">⭐ Баланс: ${balance}</div>
+                <h3>🎒 ИНВЕНТАРЬ</h3>
+                ${data.items.length === 0 ? '<div style="text-align:center; padding:40px">У вас пока нет подарков</div>' : 
+                    data.items.map(item => `
+                        <div style="background:rgba(255,255,255,0.05); border-radius:15px; padding:15px; margin:10px 0">
+                            <b>${item.name}</b> — ${item.value}⭐
+                        </div>
+                    `).join('')
+                }
+            `;
+        }
+        
+        function startGame(game) {
+            currentView = game;
+            isActive = false;
+            render();
+        }
+        
+        function openSection(section) {
+            currentView = section;
+            render();
+        }
+        
+        function goBack() {
+            if (crashInterval) clearInterval(crashInterval);
+            currentView = 'main';
+            render();
+        }
+        
+        function setBet(amount) {
+            currentBet = amount;
+            const input = document.getElementById('betAmount');
+            if (input) input.value = amount;
+        }
+        
+        function setFieldSize(size) {
+            fieldSize = size;
+            const maxBombs = size === 3 ? 8 : 24;
+            bombsCount = Math.min(bombsCount, maxBombs);
+            renderBombs();
+        }
+        
+        function updateBombs() {
+            bombsCount = parseInt(document.getElementById('bombsRange').value);
+            document.getElementById('bombsValue').innerText = bombsCount;
+        }
+        
+        async function placeBet() {
+            let amount = currentBet || parseInt(document.getElementById('betAmount')?.value || 0);
+            if (amount < 10 || amount > 10000) {
+                tg.showPopup({title: 'Ошибка', message: 'Ставка от 10 до 10000 ⭐', buttons: [{type: 'ok'}]});
+                return;
+            }
+            const data = await api('/api/crash/bet', {user_id: userId, amount: amount});
+            if (data.success) {
+                isActive = true;
+                tg.showPopup({title: 'Успех', message: `Ставка ${amount}⭐ принята!`, buttons: [{type: 'ok'}]});
+                renderCrash();
+            } else {
+                tg.showPopup({title: 'Ошибка', message: data.error, buttons: [{type: 'ok'}]});
+            }
+        }
+        
+        async function cashOut() {
+            const data = await api('/api/crash/cashout', {user_id: userId});
+            if (data.success) {
+                isActive = false;
+                tg.showPopup({title: 'Успех', message: `Ты забрал ${data.win}⭐!`, buttons: [{type: 'ok'}]});
+                renderCrash();
+            }
+        }
+        
+        async function startBombsGame() {
+            if (!currentBet) {
+                tg.showPopup({title: 'Ошибка', message: 'Выберите сумму ставки!', buttons: [{type: 'ok'}]});
+                return;
+            }
+            const data = await api('/api/bombs/start', {
+                user_id: userId,
+                bet: currentBet,
+                field_size: fieldSize,
+                bombs_count: bombsCount
+            });
+            if (data.success) {
+                game = data.game;
+                renderBombsField();
+            } else {
+                tg.showPopup({title: 'Ошибка', message: data.error, buttons: [{type: 'ok'}]});
+            }
+        }
+        
+        function renderBombsField() {
+            const field = document.getElementById('gameField');
+            field.style.display = 'grid';
+            field.style.gridTemplateColumns = `repeat(${game.field_size}, 55px)`;
+            field.innerHTML = '';
+            for (let i = 0; i < game.total_cells; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                if (game.opened_cells.includes(i)) {
+                    cell.innerText = game.bomb_positions.includes(i) ? '💣' : `${game.multiplier.toFixed(1)}x`;
+                    cell.classList.add('opened');
+                    if (game.bomb_positions.includes(i)) cell.classList.add('bomb');
+                } else {
+                    cell.innerText = '?';
+                }
+                cell.onclick = () => openCell(i);
+                field.appendChild(cell);
+            }
+            document.getElementById('gameInfo').style.display = 'block';
+            document.getElementById('multiplier').innerText = game.multiplier.toFixed(2);
+            document.getElementById('winAmount').innerText = Math.floor(currentBet * game.multiplier);
+        }
+        
+        async function openCell(index) {
+            const data = await api('/api/bombs/open', {game_id: game.game_id, cell_index: index});
+            if (data.game) {
+                game = data.game;
+                renderBombsField();
+                if (game.status === 'lost') {
+                    tg.showPopup({title: '💥 БОМБА!', message: `Ты проиграл ${currentBet}⭐`, buttons: [{type: 'ok'}]});
+                    resetBombs();
+                } else if (game.status === 'won') {
+                    tg.showPopup({title: '🎉 ПОБЕДА!', message: `Ты выиграл ${Math.floor(currentBet * game.multiplier)}⭐!`, buttons: [{type: 'ok'}]});
+                    resetBombs();
+                }
+            }
+        }
+        
+        async function cashOutBombs() {
+            const data = await api('/api/bombs/cashout', {game_id: game.game_id});
+            if (data.success) {
+                tg.showPopup({title: '✅ УСПЕХ!', message: `Ты забрал ${data.win}⭐!`, buttons: [{type: 'ok'}]});
+                resetBombs();
+            }
+        }
+        
+        function resetBombs() {
+            game = null;
+            renderBombs();
+        }
+        
+        function startCrashUpdates() {
+            if (crashInterval) clearInterval(crashInterval);
+            crashInterval = setInterval(async () => {
+                const data = await api('/api/crash/state');
+                const multiplierEl = document.getElementById('multiplier');
+                if (multiplierEl) multiplierEl.innerText = data.multiplier.toFixed(2) + 'x';
+                
+                const statusEl = document.getElementById('status');
+                if (statusEl) {
+                    if (data.running) {
+                        statusEl.innerText = '🟢 ЛЕТИТ!';
+                        statusEl.className = 'status flying';
+                        if (isActive) {
+                            const betBtn = document.getElementById('betBtn');
+                            const cashoutBtn = document.getElementById('cashoutBtn');
+                            if (betBtn) betBtn.style.display = 'none';
+                            if (cashoutBtn) cashoutBtn.style.display = 'block';
+                        }
+                    } else if (data.timer > 0) {
+                        statusEl.innerText = `⏳ Следующий раунд через ${data.timer} сек`;
+                        statusEl.className = 'status waiting';
+                        const betBtn = document.getElementById('betBtn');
+                        const cashoutBtn = document.getElementById('cashoutBtn');
+                        if (betBtn) betBtn.style.display = 'block';
+                        if (cashoutBtn) cashoutBtn.style.display = 'none';
+                        isActive = false;
+                    }
+                }
+                
+                const playersDiv = document.getElementById('players');
+                if (playersDiv) {
+                    playersDiv.innerHTML = '';
+                    for (const [id, bet] of Object.entries(data.bets)) {
+                        playersDiv.innerHTML += `<div class="player-item"><span>👤 ${bet.user_name}</span><span>${bet.amount}⭐</span><span>${bet.multiplier.toFixed(2)}x</span></div>`;
+                    }
+                }
+                
+                const historyDiv = document.getElementById('history');
+                if (historyDiv) {
+                    historyDiv.innerHTML = '';
+                    for (const res of data.history.slice(-10)) {
+                        historyDiv.innerHTML += `<span class="history-item">${res.multiplier.toFixed(2)}x</span>`;
+                    }
+                }
+            }, 500);
+        }
+        
+        render();
+    </script>
+</body>
+</html>
+'''
 
-# ===== CRASH GAME =====
+# ==================== CRASH GAME ====================
 crash_multiplier = 1.0
 crash_running = False
 crash_timer = 0
 crash_bets = {}
 crash_last_results = []
-crash_message_id = None
-crash_chat_id = None
-
-async def update_crash_message():
-    global crash_message_id, crash_chat_id
-    if not crash_chat_id:
-        return
-
-    text = "🚀 **CRASH GAME**\n\n"
-    text += f"📈 Множитель: **{crash_multiplier:.2f}x**\n"
-
-    if crash_running:
-        text += "🟢 **СТАТУС: ЛЕТИТ**\n\n"
-    elif crash_timer > 0:
-        text += f"🔴 **ВЗОРВАЛСЯ на {crash_multiplier:.2f}x**\n"
-        text += f"⏳ Следующий раунд через: **{crash_timer} сек**\n\n"
-    else:
-        text += "🟢 **СТАТУС: ЛЕТИТ**\n\n"
-
-    text += "**👥 ИГРОКИ:**\n"
-    if crash_bets:
-        for user_id, bet in crash_bets.items():
-            cursor.execute("SELECT first_name FROM users WHERE user_id=?", (user_id,))
-            user_row = cursor.fetchone()
-            name = user_row[0] if user_row else f"ID{user_id}"
-            if len(name) > 15:
-                name = name[:12] + "..."
-            if bet["status"] == "active":
-                text += f"👤 {name} — {bet['amount']}⭐ — {bet['multiplier']:.2f}x\n"
-            elif bet["status"] == "cashed":
-                text += f"✅ {name} — {bet['amount']}⭐ — ЗАБРАЛ {bet['win_amount']}⭐\n"
-            else:
-                text += f"💀 {name} — {bet['amount']}⭐ — ПРОИГРАЛ\n"
-    else:
-        text += "👻 Нет активных ставок\n"
-
-    text += "\n**📊 ПОСЛЕДНИЕ РЕЗУЛЬТАТЫ:**\n"
-    for res in crash_last_results[-5:]:
-        text += f"💥 {res['multiplier']:.2f}x\n"
-
-    kb = InlineKeyboardMarkup(row_width=1)
-    if crash_running:
-        for user_id, bet in crash_bets.items():
-            if bet["status"] == "active":
-                kb.add(InlineKeyboardButton(f"💰 ЗАБРАТЬ ({bet['multiplier']:.2f}x)", callback_data=f"crash_cashout_{user_id}"))
-    kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_main"))
-
-    try:
-        if crash_message_id:
-            await bot.edit_message_caption(caption=text, chat_id=crash_chat_id, message_id=crash_message_id, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    except:
-        pass
 
 async def crash_game_loop():
     global crash_running, crash_multiplier, crash_timer, crash_bets, crash_last_results
     while True:
-        try:
-            if crash_running:
-                crash_multiplier += 0.05
-                for user_id, bet in crash_bets.items():
-                    if bet["status"] == "active":
-                        bet["multiplier"] = crash_multiplier
-                await update_crash_message()
-                await asyncio.sleep(0.1)
-                if random.random() < 0.10:
-                    crash_running = False
-                    for user_id, bet in crash_bets.items():
-                        if bet["status"] == "active":
-                            bet["status"] = "lost"
-                    crash_last_results.append({"multiplier": crash_multiplier, "time": datetime.now()})
-                    if len(crash_last_results) > 20:
-                        crash_last_results.pop(0)
-                    crash_timer = 8
-                    await update_crash_message()
-            elif crash_timer > 0:
-                crash_timer -= 1
-                await update_crash_message()
-                await asyncio.sleep(1)
-            else:
-                crash_running = True
-                crash_multiplier = 1.0
-                crash_timer = 0
-                crash_bets = {}
-                await update_crash_message()
+        if crash_running:
+            crash_multiplier += 0.05
+            for uid in crash_bets:
+                if crash_bets[uid]['status'] == 'active':
+                    crash_bets[uid]['multiplier'] = crash_multiplier
             await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"Ошибка Crash: {e}")
+            if random.random() < 0.10:
+                crash_running = False
+                for uid in crash_bets:
+                    if crash_bets[uid]['status'] == 'active':
+                        crash_bets[uid]['status'] = 'lost'
+                crash_last_results.append({'multiplier': crash_multiplier})
+                if len(crash_last_results) > 20:
+                    crash_last_results.pop(0)
+                crash_timer = 8
+        elif crash_timer > 0:
+            crash_timer -= 1
             await asyncio.sleep(1)
+        else:
+            crash_running = True
+            crash_multiplier = 1.0
+            crash_timer = 0
+            crash_bets = {}
+        await asyncio.sleep(0.1)
 
-# ===== BOMBS GAME =====
-class BombsGame:
+# ==================== BOMBS GAME ====================
+bombs_games = {}
+
+class BombsGameObj:
     def __init__(self, user_id, field_size, bombs_count, bet):
         self.user_id = user_id
         self.field_size = field_size
@@ -339,581 +632,252 @@ class BombsGame:
         self.bet = bet
         self.total_cells = field_size * field_size
         self.safe_cells = self.total_cells - bombs_count
-        self.opened = 0
-        self.multiplier = 1.0
-        self.bomb_positions = random.sample(range(self.total_cells), bombs_count)
-        self.status = "active"
         self.opened_cells = []
-
+        self.bomb_positions = random.sample(range(self.total_cells), bombs_count)
+        self.multiplier = 1.0
+        self.status = 'active'
+    
     def get_multiplier(self):
-        if self.safe_cells - self.opened > 0:
-            self.multiplier = 1 + (self.opened * 0.2)
+        opened = len(self.opened_cells)
+        if self.safe_cells - opened > 0:
+            self.multiplier = 1 + (opened * 0.2)
         return round(self.multiplier, 2)
-
-    def open_cell(self, cell_index):
-        if cell_index in self.opened_cells:
-            return False, 0, "already"
-        if cell_index in self.bomb_positions:
-            self.status = "lost"
-            return False, 0, "bomb"
-        self.opened += 1
-        self.opened_cells.append(cell_index)
-        multiplier = self.get_multiplier()
-        if self.opened == self.safe_cells:
-            self.status = "won"
-            win = int(self.bet * multiplier)
-            return True, win, "win"
-        return True, 0, "safe"
-
+    
+    def open_cell(self, index):
+        if index in self.opened_cells:
+            return None, 'already'
+        if index in self.bomb_positions:
+            self.status = 'lost'
+            return None, 'bomb'
+        self.opened_cells.append(index)
+        self.get_multiplier()
+        if len(self.opened_cells) == self.safe_cells:
+            self.status = 'won'
+            win = int(self.bet * self.multiplier)
+            return win, 'win'
+        return None, 'safe'
+    
     def cashout(self):
-        if self.opened > 0 and self.status == "active":
+        if len(self.opened_cells) > 0 and self.status == 'active':
             win = int(self.bet * self.get_multiplier())
-            self.status = "cashed"
+            self.status = 'cashed'
             return win
         return 0
 
-    def get_field_state(self):
-        result = []
-        for i in range(self.total_cells):
-            if i in self.opened_cells:
-                if i in self.bomb_positions:
-                    result.append("💣")
-                else:
-                    result.append(f"{self.get_multiplier():.1f}x")
-            else:
-                result.append("❓")
-        return result
+# ==================== FLASK API ====================
+@app.route('/')
+def index():
+    return HTML_PAGE
 
-bombs_games = {}
-bombs_temp = {}
+@app.route('/api/balance')
+def api_balance():
+    user_id = request.args.get('user_id', type=int)
+    return jsonify({'balance': get_balance(user_id)})
 
-# ===== КЛАВИАТУРЫ =====
+@app.route('/api/crash/state')
+def api_crash_state():
+    return jsonify({
+        'multiplier': crash_multiplier,
+        'running': crash_running,
+        'timer': crash_timer,
+        'bets': {uid: {'amount': bet['amount'], 'multiplier': bet['multiplier'], 'user_name': bet.get('user_name', '')} 
+                 for uid, bet in crash_bets.items()},
+        'history': crash_last_results[-10:]
+    })
 
-def start_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("📢 КАНАЛ", callback_data="channel"),
-        InlineKeyboardButton("🎮 ИГРАТЬ", callback_data="play"),
-    )
-    return kb
+@app.route('/api/crash/bet', methods=['POST'])
+def api_crash_bet():
+    data = request.json
+    user_id = data['user_id']
+    amount = int(data['amount'])
+    
+    if not crash_running:
+        return jsonify({'success': False, 'error': 'Раунд не активен'})
+    
+    balance = get_balance(user_id)
+    if amount > balance:
+        return jsonify({'success': False, 'error': f'Недостаточно средств! Баланс: {balance}⭐'})
+    
+    update_balance(user_id, -amount)
+    cursor.execute("SELECT first_name FROM users WHERE user_id=?", (user_id,))
+    user_name = cursor.fetchone()[0]
+    
+    crash_bets[user_id] = {
+        'amount': amount,
+        'multiplier': 1.0,
+        'status': 'active',
+        'user_name': user_name,
+        'win_amount': 0
+    }
+    return jsonify({'success': True})
 
-def main_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("🚀 CRASH", callback_data="game_crash"),
-        InlineKeyboardButton("💣 BOMBS", callback_data="game_bombs"),
-        InlineKeyboardButton("⬆️ UPGRADE", callback_data="game_upgrade"),
-        InlineKeyboardButton("📦 МАГАЗИН", callback_data="shop"),
-        InlineKeyboardButton("👤 ПРОФИЛЬ", callback_data="profile"),
-        InlineKeyboardButton("👥 РЕФЕРАЛЫ", callback_data="referral"),
-        InlineKeyboardButton("🏆 РЕЙТИНГ", callback_data="leaderboard"),
-        InlineKeyboardButton("🎁 РОЗЫГРЫШ", callback_data="raffle"),
-        InlineKeyboardButton("🎒 ИНВЕНТАРЬ", callback_data="inventory"),
-        InlineKeyboardButton("🏆 ДОСТИЖЕНИЯ", callback_data="achievements"),
-    )
-    kb.add(InlineKeyboardButton("📢 КАНАЛ", callback_data="channel"))
-    return kb
+@app.route('/api/crash/cashout', methods=['POST'])
+def api_crash_cashout():
+    data = request.json
+    user_id = data['user_id']
+    
+    bet = crash_bets.get(user_id)
+    if not bet or bet['status'] != 'active':
+        return jsonify({'success': False, 'error': 'Ставка не активна'})
+    
+    win = int(bet['amount'] * bet['multiplier'])
+    bet['status'] = 'cashed'
+    bet['win_amount'] = win
+    update_balance(user_id, win)
+    return jsonify({'success': True, 'win': win})
 
-def back_button():
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
-    return kb
+@app.route('/api/bombs/start', methods=['POST'])
+def api_bombs_start():
+    data = request.json
+    user_id = data['user_id']
+    bet = data['bet']
+    field_size = data['field_size']
+    bombs_count = data['bombs_count']
+    
+    balance = get_balance(user_id)
+    if bet > balance:
+        return jsonify({'success': False, 'error': f'Недостаточно средств! Баланс: {balance}⭐'})
+    
+    update_balance(user_id, -bet)
+    
+    game = BombsGameObj(user_id, field_size, bombs_count, bet)
+    game_id = int(time.time())
+    bombs_games[game_id] = game
+    
+    return jsonify({'success': True, 'game': {
+        'game_id': game_id,
+        'field_size': game.field_size,
+        'total_cells': game.total_cells,
+        'bomb_positions': game.bomb_positions,
+        'opened_cells': game.opened_cells,
+        'multiplier': game.get_multiplier(),
+        'status': game.status
+    }})
 
-# ===== ОБРАБОТЧИКИ =====
-user_data = {}
+@app.route('/api/bombs/open', methods=['POST'])
+def api_bombs_open():
+    data = request.json
+    game_id = data['game_id']
+    cell_index = data['cell_index']
+    
+    game = bombs_games.get(game_id)
+    if not game:
+        return jsonify({'success': False, 'error': 'Игра не найдена'})
+    
+    win, result = game.open_cell(cell_index)
+    
+    if result == 'bomb':
+        return jsonify({'success': True, 'game': {
+            'game_id': game_id,
+            'field_size': game.field_size,
+            'total_cells': game.total_cells,
+            'bomb_positions': game.bomb_positions,
+            'opened_cells': game.opened_cells,
+            'multiplier': game.get_multiplier(),
+            'status': 'lost'
+        }})
+    
+    if result == 'win':
+        update_balance(game.user_id, win)
+        return jsonify({'success': True, 'game': {
+            'game_id': game_id,
+            'field_size': game.field_size,
+            'total_cells': game.total_cells,
+            'bomb_positions': game.bomb_positions,
+            'opened_cells': game.opened_cells,
+            'multiplier': game.get_multiplier(),
+            'status': 'won'
+        }})
+    
+    return jsonify({'success': True, 'game': {
+        'game_id': game_id,
+        'field_size': game.field_size,
+        'total_cells': game.total_cells,
+        'bomb_positions': game.bomb_positions,
+        'opened_cells': game.opened_cells,
+        'multiplier': game.get_multiplier(),
+        'status': 'active'
+    }})
 
+@app.route('/api/bombs/cashout', methods=['POST'])
+def api_bombs_cashout():
+    data = request.json
+    game_id = data['game_id']
+    
+    game = bombs_games.get(game_id)
+    if not game:
+        return jsonify({'success': False, 'error': 'Игра не найдена'})
+    
+    win = game.cashout()
+    if win > 0:
+        update_balance(game.user_id, win)
+        return jsonify({'success': True, 'win': win})
+    
+    return jsonify({'success': False, 'error': 'Нельзя забрать'})
+
+@app.route('/api/profile')
+def api_profile():
+    user_id = request.args.get('user_id', type=int)
+    cursor.execute("SELECT first_name, level, exp, total_won, created_at FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    if result:
+        return jsonify({
+            'first_name': result[0],
+            'level': result[1],
+            'exp': result[2] % 1000,
+            'total_won': result[3],
+            'created_at': result[4]
+        })
+    return jsonify({'first_name': 'User', 'level': 1, 'exp': 0, 'total_won': 0, 'created_at': ''})
+
+@app.route('/api/referral')
+def api_referral():
+    user_id = request.args.get('user_id', type=int)
+    cursor.execute("SELECT referral_code, referral_earnings FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE referrer_id=?", (user_id,))
+    count = cursor.fetchone()[0]
+    return jsonify({'code': result[0] if result else '', 'earnings': result[1] if result else 0, 'count': count})
+
+@app.route('/api/inventory')
+def api_inventory():
+    user_id = request.args.get('user_id', type=int)
+    cursor.execute("SELECT gift_name, gift_value FROM inventory WHERE user_id=? ORDER BY obtained_at DESC LIMIT 20", (user_id,))
+    items = cursor.fetchall()
+    return jsonify({'items': [{'name': i[0], 'value': i[1]} for i in items]})
+
+# ==================== TELEGRAM BOT ====================
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
-    print(f"Получена команда /start от {message.from_user.id}")
     user = message.from_user
     args = message.get_args()
     ref = args if args and args.startswith("ref_") else None
     
-    register_user(user.id, user.username, user.first_name, ref)
+    register_user(user.id, user.username, user.first_name)
     
-    text = (
-        "✨ <b>Zenvira Gift</b> ✨\n\n"
-        "🎁 Отправляйте подарки друзьям, получайте награды!\n\n"
-        "⭐ <b>Telegram Stars</b> — основная валюта\n"
-        "🎮 Играйте и повышайте уровень\n\n"
-        "👉 <a href='https://t.me/zenviragift'>Подпишись на канал</a>"
-    )
+    webapp_url = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'your-domain.railway.app')}"
     
-    await message.reply_photo(
-        photo=PHOTO_ID,
-        caption=text,
-        reply_markup=start_menu(),
-        parse_mode=ParseMode.HTML
-    )
-    print(f"Ответ отправлен пользователю {user.id}")
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("🎮 ОТКРЫТЬ ИГРЫ", web_app=WebAppInfo(url=webapp_url)))
+    kb.add(InlineKeyboardButton("📢 КАНАЛ", url="https://t.me/zenviragift"))
+    
+    text = f"✨ <b>Zenvira Gift</b> ✨\n\n⭐ Баланс: {get_balance(user.id)}\n\n👇 Нажми на кнопку, чтобы открыть игры!"
+    
+    await message.reply(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
-@dp.callback_query_handler(lambda c: c.data == "channel")
-async def channel_button(callback: types.CallbackQuery):
-    await callback.answer()
-    await bot.send_message(callback.from_user.id, 
-        "📢 <b>Наш канал:</b>\nhttps://t.me/zenviragift",
-        parse_mode=ParseMode.HTML)
-
-@dp.callback_query_handler(lambda c: c.data == "play")
-async def play_button(callback: types.CallbackQuery):
-    print(f"Нажата кнопка ИГРАТЬ от {callback.from_user.id}")
-    user_id = callback.from_user.id
-    balance = get_balance(user_id)
-    cursor.execute("SELECT level FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    level = result[0] if result else 1
-    
-    text = (
-        f"🎮 <b>Zenvira Gift</b> 🎮\n\n"
-        f"👤 <b>{callback.from_user.first_name}</b>\n"
-        f"⭐ Баланс: <b>{balance}</b>\n"
-        f"🎚️ Уровень: <b>{level}</b>\n\n"
-        f"👇 <b>Выберите действие:</b>"
-    )
-    
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=main_menu(),
-        parse_mode=ParseMode.HTML
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "back_to_main")
-async def back_to_main(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    balance = get_balance(user_id)
-    cursor.execute("SELECT level FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    level = result[0] if result else 1
-    
-    text = (
-        f"🎮 <b>Zenvira Gift</b> 🎮\n\n"
-        f"👤 <b>{callback.from_user.first_name}</b>\n"
-        f"⭐ Баланс: <b>{balance}</b>\n"
-        f"🎚️ Уровень: <b>{level}</b>\n\n"
-        f"👇 <b>Выберите действие:</b>"
-    )
-    
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=main_menu(),
-        parse_mode=ParseMode.HTML
-    )
-    await callback.answer()
-
-# ===== CRASH ХЭНДЛЕРЫ =====
-@dp.callback_query_handler(lambda c: c.data == "game_crash")
-async def game_crash(callback: types.CallbackQuery):
-    global crash_chat_id, crash_message_id
-    crash_chat_id = callback.message.chat.id
-    user_id = callback.from_user.id
-    balance = get_balance(user_id)
-    
-    text = "🚀 **CRASH GAME**\n\n"
-    text += f"💰 Баланс: {balance} ⭐\n\n"
-    if crash_running:
-        text += "🟢 Раунд идёт! Введи сумму ставки (от 10 до 10000):"
-        user_data[user_id] = {"game": "crash", "step": "awaiting_bet"}
-    else:
-        text += "🔴 Раунд не активен. Дождись следующего раунда."
-
-    msg = await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-    if crash_message_id is None:
-        crash_message_id = msg.message_id
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("crash_cashout_"))
-async def crash_cashout(callback: types.CallbackQuery):
-    user_id = int(callback.data.split("_")[2])
-    if user_id != callback.from_user.id:
-        await callback.answer("❌ Это не твоя ставка!", show_alert=True)
-        return
-    
-    bet = crash_bets.get(user_id)
-    if not bet or bet["status"] != "active":
-        await callback.answer("❌ Ставка уже не активна!", show_alert=True)
-        return
-    
-    win_amount = int(bet["amount"] * bet["multiplier"])
-    bet["status"] = "cashed"
-    bet["win_amount"] = win_amount
-    update_balance(user_id, win_amount)
-    
-    await callback.answer(f"✅ Ты забрал {win_amount} ⭐!", show_alert=True)
-    await update_crash_message()
-
-@dp.message_handler(lambda msg: msg.text and msg.text.isdigit() and msg.from_user.id in user_data and user_data.get(msg.from_user.id, {}).get("game") == "crash")
-async def handle_crash_bet(message: types.Message):
-    user_id = message.from_user.id
-    amount = int(message.text)
-    
-    if not (10 <= amount <= 10000):
-        await message.reply("❌ Ставка должна быть от 10 до 10000 ⭐")
-        return
-    
-    if not crash_running:
-        await message.reply("❌ Сейчас нельзя сделать ставку, раунд не активен!")
-        return
-    
-    balance = get_balance(user_id)
-    if amount > balance:
-        await message.reply(f"❌ Недостаточно средств! Баланс: {balance} ⭐")
-        return
-    
-    update_balance(user_id, -amount)
-    
-    crash_bets[user_id] = {
-        "id": int(time.time()),
-        "amount": amount,
-        "multiplier": crash_multiplier,
-        "status": "active",
-        "win_amount": 0
-    }
-    
-    await message.reply(f"✅ Ставка {amount} ⭐ принята!")
-    await update_crash_message()
-    user_data.pop(user_id, None)
-
-# ===== BOMBS ХЭНДЛЕРЫ =====
-@dp.callback_query_handler(lambda c: c.data == "game_bombs")
-async def game_bombs_menu(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    balance = get_balance(user_id)
-    
-    text = "💣 **BOMBS GAME**\n\n"
-    text += f"💰 Баланс: {balance} ⭐\n\n"
-    text += "🎮 **Выбери размер поля:**"
-    
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("3x3", callback_data="bombs_size_3"),
-        InlineKeyboardButton("5x5", callback_data="bombs_size_5"),
-    )
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("bombs_size_"))
-async def bombs_select_size(callback: types.CallbackQuery):
-    size = callback.data.split("_")[2]
-    user_id = callback.from_user.id
-    bombs_temp[user_id] = {"size": int(size), "step": "choose_bombs"}
-    
-    text = "💣 **BOMBS GAME**\n\n"
-    text += f"📏 Размер поля: {size}x{size}\n\n"
-    text += "💣 **Выбери количество бомб:**"
-    
-    max_bombs = {"3": 8, "5": 24}[size]
-    kb = InlineKeyboardMarkup(row_width=4)
-    row = []
-    for i in range(1, min(max_bombs + 1, 9)):
-        row.append(InlineKeyboardButton(str(i), callback_data=f"bombs_set_{size}_{i}"))
-        if len(row) == 4:
-            kb.row(*row)
-            row = []
-    if row:
-        kb.row(*row)
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="game_bombs"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("bombs_set_"))
-async def bombs_set_bombs(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    size = int(parts[2])
-    bombs = int(parts[3])
-    user_id = callback.from_user.id
-    
-    bombs_temp[user_id] = {"size": size, "bombs": bombs, "step": "awaiting_bet"}
-    
-    text = "💣 **BOMBS GAME**\n\n"
-    text += f"📏 Поле: {size}x{size}\n"
-    text += f"💣 Бомб: {bombs}\n\n"
-    text += "💰 **Выбери сумму ставки:**"
-    kb = InlineKeyboardMarkup(row_width=3)
-    for amount in [10, 50, 100, 200, 500, 1000]:
-        kb.insert(InlineKeyboardButton(f"{amount}⭐", callback_data=f"bombs_bet_{amount}"))
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="game_bombs"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("bombs_bet_"))
-async def bombs_take_bet(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    amount = int(callback.data.split("_")[2])
-    if user_id not in bombs_temp or bombs_temp[user_id].get("step") != "awaiting_bet":
-        await callback.answer("❌ Сначала выбери поле и бомбы", show_alert=True)
-        return
-    
-    balance = get_balance(user_id)
-    if amount > balance:
-        await callback.answer(f"❌ Недостаточно средств! Баланс: {balance} ⭐", show_alert=True)
-        return
-    
-    update_balance(user_id, -amount)
-    bombs_temp[user_id]["bet"] = amount
-    size = bombs_temp[user_id]["size"]
-    bombs = bombs_temp[user_id]["bombs"]
-    
-    game = BombsGame(user_id, size, bombs, amount)
-    game.game_id = int(time.time())
-    bombs_games[game.game_id] = game
-    bombs_temp.pop(user_id, None)
-    
-    await start_bombs_game(callback.message, game)
-    await callback.answer()
-
-async def start_bombs_game(message, game):
-    size = game.field_size
-    
-    text = f"💣 **BOMBS GAME**\n\n"
-    text += f"📏 Поле: {size}x{size}\n"
-    text += f"💣 Бомб: {game.bombs_count}\n"
-    text += f"💰 Ставка: {game.bet} ⭐\n"
-    text += f"📈 Множитель: {game.get_multiplier():.2f}x\n"
-    text += f"🎯 Открыто клеток: {game.opened}/{game.safe_cells}\n\n"
-    text += "**Нажми на клетку:**"
-    
-    kb = InlineKeyboardMarkup(row_width=size)
-    field = game.get_field_state()
-    for i, cell in enumerate(field):
-        kb.insert(InlineKeyboardButton(cell, callback_data=f"bombs_open_{game.game_id}_{i}"))
-    
-    cashout_btn = InlineKeyboardButton(f"💰 ЗАБРАТЬ ({game.get_multiplier():.2f}x)", callback_data=f"bombs_cashout_{game.game_id}")
-    if game.opened == 0:
-        cashout_btn = InlineKeyboardButton(f"⏳ НАЧНИ ИГРУ", callback_data="noop")
-    kb.add(cashout_btn)
-    kb.add(InlineKeyboardButton("🔙 МЕНЮ", callback_data="back_to_main"))
-    
-    await message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("bombs_open_"))
-async def bombs_open_cell(callback: types.CallbackQuery):
-    parts = callback.data.split("_")
-    game_id = int(parts[2])
-    cell_index = int(parts[3])
-    
-    game = bombs_games.get(game_id)
-    if not game or game.user_id != callback.from_user.id:
-        await callback.answer("❌ Игра не найдена", show_alert=True)
-        return
-    
-    if game.status != "active":
-        await callback.answer("❌ Игра уже закончена!", show_alert=True)
-        return
-    
-    result, win, reason = game.open_cell(cell_index)
-    
-    if reason == "already":
-        await callback.answer("❌ Эта клетка уже открыта!", show_alert=True)
-        return
-    
-    if reason == "bomb":
-        text = f"💣 **ТЫ НАРВАЛСЯ НА БОМБУ!** 💣\n\n"
-        text += f"💰 Ставка: {game.bet} ⭐\n"
-        text += f"💀 Ты проиграл {game.bet} ⭐"
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton("🔙 ИГРАТЬ СНОВА", callback_data="game_bombs"))
-        kb.add(InlineKeyboardButton("🔙 МЕНЮ", callback_data="back_to_main"))
-        await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-        await callback.answer("💥 БАХ!", show_alert=True)
-        return
-    
-    if win > 0:
-        update_balance(game.user_id, win)
-        text = f"🎉 **ТЫ ВЫИГРАЛ!** 🎉\n\n"
-        text += f"💰 Ставка: {game.bet} ⭐\n"
-        text += f"📈 Множитель: {game.get_multiplier():.2f}x\n"
-        text += f"🎁 ВЫИГРЫШ: {win} ⭐\n\n"
-        text += f"✨ Новый баланс: {get_balance(game.user_id)} ⭐"
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton("🔙 ИГРАТЬ СНОВА", callback_data="game_bombs"))
-        kb.add(InlineKeyboardButton("🔙 МЕНЮ", callback_data="back_to_main"))
-        await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-        await callback.answer(f"🎉 Выигрыш {win} ⭐!", show_alert=True)
-        return
-    
-    await start_bombs_game(callback.message, game)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("bombs_cashout_"))
-async def bombs_cashout(callback: types.CallbackQuery):
-    game_id = int(callback.data.split("_")[2])
-    game = bombs_games.get(game_id)
-    if not game or game.user_id != callback.from_user.id:
-        await callback.answer("❌ Игра не найдена", show_alert=True)
-        return
-    win = game.cashout()
-    if win > 0:
-        update_balance(game.user_id, win)
-        text = f"💰 **ТЫ ЗАБРАЛ {win} ⭐!**"
-        await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-        await callback.answer(f"✅ Забрал {win} ⭐!", show_alert=True)
-    else:
-        await callback.answer("❌ Нельзя забрать раньше первого открытия!", show_alert=True)
-
-# ===== ПРОЧИЕ ХЭНДЛЕРЫ (упрощённые) =====
-@dp.callback_query_handler(lambda c: c.data == "game_upgrade")
-async def game_upgrade(callback: types.CallbackQuery):
-    await callback.message.edit_caption(
-        caption="⬆️ **UPGRADE GAME**\n\nВ разработке!",
-        reply_markup=back_button(),
-        parse_mode=ParseMode.MARKDOWN
-    )
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "shop")
-async def shop_button(callback: types.CallbackQuery):
-    cursor.execute("SELECT name, price_stars, gift_value FROM shop_items")
-    items = cursor.fetchall()
-    
-    text = "📦 **МАГАЗИН**\n\n"
-    for item in items:
-        text += f"• {item[0]} — {item[1]}⭐ (подарок на {item[2]}⭐)\n"
-    text += f"\n💰 Баланс: {get_balance(callback.from_user.id)} ⭐"
-    
-    kb = InlineKeyboardMarkup(row_width=2)
-    for i, item in enumerate(items, 1):
-        kb.insert(InlineKeyboardButton(f"💰 {item[0]}", callback_data=f"buy_{i}"))
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("buy_"))
-async def buy_item(callback: types.CallbackQuery):
-    item_id = int(callback.data.split("_")[1])
-    user_id = callback.from_user.id
-    
-    cursor.execute("SELECT name, price_stars, gift_value, gift_rarity FROM shop_items WHERE id=?", (item_id,))
-    item = cursor.fetchone()
-    
-    if not item:
-        await callback.answer("❌ Товар не найден!", show_alert=True)
-        return
-    
-    name, price, gift_value, rarity = item
-    balance = get_balance(user_id)
-    
-    if balance < price:
-        await callback.answer(f"❌ Недостаточно Stars! Нужно: {price}⭐", show_alert=True)
-        return
-    
-    update_balance(user_id, -price)
-    add_to_inventory(user_id, name, gift_value, "gift", rarity)
-    
-    await callback.answer(f"✅ Ты купил {name} за {price}⭐!", show_alert=True)
-    await shop_button(callback)
-
-@dp.callback_query_handler(lambda c: c.data == "profile")
-async def profile_button(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    cursor.execute("SELECT balance_stars, level, exp, total_won, created_at FROM users WHERE user_id=?", (user_id,))
-    data = cursor.fetchone()
-    
-    if data:
-        balance, level, exp, total_won, created_at = data
-        text = f"👤 **ПРОФИЛЬ**\n\n⭐ Баланс: {balance}\n🎚️ Уровень: {level}\n🏆 Выиграно: {total_won}\n📅 Регистрация: {created_at}"
-    else:
-        text = "👤 **ПРОФИЛЬ**\n\nДанные не найдены"
-    
-    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "referral")
-async def referral_button(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    cursor.execute("SELECT referral_code FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    
-    if result:
-        code = result[0]
-        bot_username = (await bot.get_me()).username
-        link = f"https://t.me/{bot_username}?start=ref_{code}"
-        
-        text = f"👥 **РЕФЕРАЛЫ**\n\n🔗 Ссылка:\n<code>{link}</code>\n\n✨ За друга: 100⭐"
-        
-        kb = InlineKeyboardMarkup(row_width=1)
-        kb.add(InlineKeyboardButton("📤 Поделиться", url=f"https://t.me/share/url?url={link}&text=Присоединяйся!"))
-        kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
-        
-        await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.HTML)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "leaderboard")
-async def leaderboard_button(callback: types.CallbackQuery):
-    cursor.execute("SELECT first_name, balance_stars FROM users ORDER BY balance_stars DESC LIMIT 5")
-    top = cursor.fetchall()
-    
-    text = "🏆 **РЕЙТИНГ**\n\n"
-    for i, (name, balance) in enumerate(top, 1):
-        text += f"{i}. {name[:15]} — {balance}⭐\n"
-    
-    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "raffle")
-async def raffle_button(callback: types.CallbackQuery):
-    text = "🎁 **РОЗЫГРЫШ**\n\nЕженедельный розыгрыш 5000⭐!\nПокупайте подарки и получайте билеты!"
-    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "inventory")
-async def inventory_button(callback: types.CallbackQuery):
-    cursor.execute("SELECT gift_name, gift_value FROM inventory WHERE user_id=? ORDER BY obtained_at DESC LIMIT 10", (callback.from_user.id,))
-    items = cursor.fetchall()
-    
-    if not items:
-        text = "🎒 **ИНВЕНТАРЬ**\n\nУ тебя пока нет подарков"
-    else:
-        text = "🎒 **ИНВЕНТАРЬ**\n\n"
-        for name, value in items:
-            text += f"• {name} — {value}⭐\n"
-    
-    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "achievements")
-async def achievements_button(callback: types.CallbackQuery):
-    text = "🏆 **ДОСТИЖЕНИЯ**\n\n• Первый подарок — 100⭐\n• 1000 Stars — 500⭐\n• Король подарков — 5000⭐\n• Легенда — 10000⭐"
-    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data == "noop")
-async def noop_callback(callback: types.CallbackQuery):
-    await callback.answer("🔴 Сначала открой клетку!")
-
-# ===== FLASK ДЛЯ RAILWAY =====
-app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "Zenvira Gift Bot is running!"
-
-@app.route('/health')
-def health():
-    return "OK", 200
-
+# ==================== ЗАПУСК ====================
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# ===== ЗАПУСК =====
 async def on_startup(dp):
     asyncio.create_task(crash_game_loop())
     print("=" * 40)
     print("✅ Бот Zenvira Gift успешно запущен!")
     me = await bot.get_me()
     print(f"🤖 @{me.username}")
-    print(f"📢 Канал: https://t.me/zenviragift")
     print("=" * 40)
-
-async def on_shutdown(dp):
-    print("🛑 Бот останавливается...")
-    await bot.close()
 
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
