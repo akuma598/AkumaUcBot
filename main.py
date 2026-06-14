@@ -1,15 +1,10 @@
 import os
-import sqlite3
-import random
-import asyncio
-import time
-import secrets
-from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils import executor
-from flask import Flask, request, jsonify
+from flask import Flask, send_file, send_from_directory
 from threading import Thread
+import io
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -20,39 +15,8 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 app = Flask(__name__)
 
-# ========== БАЗА ДАННЫХ ==========
-conn = sqlite3.connect("zenvira.db", check_same_thread=False)
-cursor = conn.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    first_name TEXT,
-    balance INTEGER DEFAULT 500,
-    created_at TEXT
-)
-""")
-conn.commit()
-
-def get_balance(user_id):
-    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    return result[0] if result else 500
-
-def update_balance(user_id, amount):
-    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
-    conn.commit()
-
-def register_user(user_id, username, first_name):
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (user_id, username, first_name, created_at) VALUES (?, ?, ?, ?)",
-                       (user_id, username or "Anonymous", first_name or "User", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        conn.commit()
-
-# ========== HTML ==========
-HTML = '''
-<!DOCTYPE html>
+# ========== HTML СТРАНИЦА С ИГРАМИ ==========
+HTML_CONTENT = '''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -63,13 +27,14 @@ HTML = '''
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: linear-gradient(135deg, #0a0a2a, #1a1a3a);
-            font-family: Arial, sans-serif;
+            font-family: system-ui, -apple-system, sans-serif;
             color: white;
+            min-height: 100vh;
             padding: 20px;
         }
         .container { max-width: 500px; margin: 0 auto; }
         .balance {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.15);
             border-radius: 20px;
             padding: 20px;
             text-align: center;
@@ -81,12 +46,13 @@ HTML = '''
             border-radius: 20px;
             padding: 30px;
             text-align: center;
-            margin: 10px 0;
+            margin: 15px 0;
             cursor: pointer;
+            transition: 0.2s;
         }
-        .game-card:active { background: rgba(255,255,255,0.2); }
+        .game-card:active { transform: scale(0.97); background: rgba(255,255,255,0.2); }
         .game-icon { font-size: 48px; }
-        .game-name { font-size: 20px; margin-top: 10px; }
+        .game-name { font-size: 24px; margin-top: 10px; font-weight: bold; }
         .back-btn {
             background: rgba(255,255,255,0.1);
             border: none;
@@ -97,30 +63,33 @@ HTML = '''
             cursor: pointer;
         }
         .multiplier {
-            font-size: 48px;
+            font-size: 56px;
             text-align: center;
             color: #ffd700;
             margin: 20px 0;
+            font-weight: bold;
         }
+        .bet-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; justify-content: center; }
         .bet-btn {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.15);
             border: none;
-            padding: 10px 15px;
+            padding: 12px 18px;
             color: white;
-            border-radius: 10px;
-            margin: 5px;
+            border-radius: 12px;
+            font-size: 16px;
             cursor: pointer;
         }
         .action-btn {
             background: linear-gradient(135deg, #667eea, #764ba2);
             border: none;
-            padding: 15px;
+            padding: 14px;
             color: white;
-            border-radius: 10px;
+            border-radius: 12px;
             width: 100%;
             margin: 10px 0;
-            cursor: pointer;
             font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
         }
         .cashout-btn { background: linear-gradient(135deg, #f093fb, #f5576c); }
         input {
@@ -131,6 +100,7 @@ HTML = '''
             border-radius: 10px;
             width: 100%;
             margin: 10px 0;
+            font-size: 16px;
         }
         .field {
             display: grid;
@@ -140,20 +110,43 @@ HTML = '''
         }
         .cell {
             background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            width: 55px;
-            height: 55px;
+            border-radius: 12px;
+            width: 60px;
+            height: 60px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 20px;
+            font-weight: bold;
             cursor: pointer;
         }
-        .cell.opened { background: rgba(0,255,0,0.2); }
-        .cell.bomb { background: rgba(255,0,0,0.3); }
-        .players { background: rgba(255,255,255,0.05); border-radius: 15px; padding: 15px; margin-top: 20px; }
-        .players h3 { margin-bottom: 10px; }
-        .player { display: flex; justify-content: space-between; padding: 5px 0; }
+        .cell.opened { background: rgba(0,255,0,0.3); }
+        .cell.bomb { background: rgba(255,0,0,0.4); }
+        .players-list {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .players-list h3 { margin-bottom: 10px; font-size: 16px; }
+        .player-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .size-select { display: flex; gap: 10px; margin: 15px 0; }
+        .size-btn {
+            flex: 1;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .size-btn.active { background: linear-gradient(135deg, #667eea, #764ba2); }
     </style>
 </head>
 <body>
@@ -163,37 +156,45 @@ HTML = '''
         tg.expand();
         let userId = tg.initDataUnsafe?.user?.id;
         let view = 'main';
-        let crashInterval = null;
+        let updateInterval = null;
         let currentBet = 0;
-        let active = false;
+        let inGame = false;
         let fieldSize = 3;
         let bombsCount = 3;
         let game = null;
         
         async function api(url, data = null) {
-            let opts = { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
-            if (data) opts.body = JSON.stringify(data);
-            let res = await fetch(url, opts);
-            return res.json();
+            try {
+                let opts = { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
+                if (data) opts.body = JSON.stringify(data);
+                let res = await fetch(url, opts);
+                return await res.json();
+            } catch(e) { return { error: true }; }
         }
         
         async function getBalance() {
             let data = await api(`/api/balance?user_id=${userId}`);
-            return data.balance;
+            return data.balance || 500;
         }
         
         async function renderMain() {
             let balance = await getBalance();
             document.getElementById('app').innerHTML = `
                 <div class="balance">⭐ <span>${balance}</span></div>
-                <div class="game-card" onclick="startCrash()"><div class="game-icon">🚀</div><div class="game-name">CRASH</div></div>
-                <div class="game-card" onclick="startBombs()"><div class="game-icon">💣</div><div class="game-name">BOMBS</div></div>
+                <div class="game-card" onclick="startCrash()">
+                    <div class="game-icon">🚀</div>
+                    <div class="game-name">CRASH</div>
+                </div>
+                <div class="game-card" onclick="startBombs()">
+                    <div class="game-icon">💣</div>
+                    <div class="game-name">BOMBS</div>
+                </div>
             `;
         }
         
         async function startCrash() {
             view = 'crash';
-            active = false;
+            inGame = false;
             await renderCrash();
             startCrashUpdates();
         }
@@ -204,7 +205,7 @@ HTML = '''
                 <button class="back-btn" onclick="goBack()">← Назад</button>
                 <div class="multiplier" id="multiplier">1.00x</div>
                 <div class="balance">⭐ ${balance}</div>
-                <div>
+                <div class="bet-buttons">
                     <button class="bet-btn" onclick="setBet(10)">10</button>
                     <button class="bet-btn" onclick="setBet(50)">50</button>
                     <button class="bet-btn" onclick="setBet(100)">100</button>
@@ -212,10 +213,10 @@ HTML = '''
                     <button class="bet-btn" onclick="setBet(500)">500</button>
                     <button class="bet-btn" onclick="setBet(1000)">1000</button>
                 </div>
-                <input type="number" id="betInput" placeholder="Своя сумма">
-                <button class="action-btn" id="betBtn" onclick="placeBet()">Сделать ставку</button>
+                <input type="number" id="betInput" placeholder="Своя сумма" min="10" max="10000">
+                <button class="action-btn" id="betBtn" onclick="placeBet()">🚀 Сделать ставку</button>
                 <button class="action-btn cashout-btn" id="cashoutBtn" onclick="cashOut()" style="display:none">💰 ЗАБРАТЬ</button>
-                <div class="players" id="players"><h3>👥 Игроки</h3></div>
+                <div class="players-list" id="players"><h3>👥 Игроки</h3></div>
             `;
         }
         
@@ -224,12 +225,12 @@ HTML = '''
             document.getElementById('app').innerHTML = `
                 <button class="back-btn" onclick="goBack()">← Назад</button>
                 <div class="balance">⭐ ${balance}</div>
-                <div>
-                    <button class="bet-btn" onclick="setFieldSize(3)">3x3</button>
-                    <button class="bet-btn" onclick="setFieldSize(5)">5x5</button>
+                <div class="size-select">
+                    <button class="size-btn ${fieldSize===3?'active':''}" onclick="setFieldSize(3)">3x3</button>
+                    <button class="size-btn ${fieldSize===5?'active':''}" onclick="setFieldSize(5)">5x5</button>
                 </div>
-                <div>💣 Бомб: <input type="range" id="bombsRange" min="1" max="8" value="3" onchange="updateBombs()"> <span id="bombsVal">3</span></div>
-                <div>
+                <div>💣 Бомб: <input type="range" id="bombsRange" min="1" max="${fieldSize===3?8:24}" value="${bombsCount}" onchange="updateBombs()"> <span id="bombsVal">${bombsCount}</span></div>
+                <div class="bet-buttons">
                     <button class="bet-btn" onclick="setBet(10)">10</button>
                     <button class="bet-btn" onclick="setBet(50)">50</button>
                     <button class="bet-btn" onclick="setBet(100)">100</button>
@@ -237,11 +238,11 @@ HTML = '''
                     <button class="bet-btn" onclick="setBet(500)">500</button>
                     <button class="bet-btn" onclick="setBet(1000)">1000</button>
                 </div>
-                <button class="action-btn" onclick="startBombsGame()">Начать игру</button>
+                <button class="action-btn" onclick="startBombsGame()">💣 Начать игру</button>
                 <div id="gameField" class="field" style="display:none"></div>
-                <div id="gameInfo" style="display:none">
-                    <div id="gameMultiplier" style="font-size:24px; text-align:center; margin:10px">1.00x</div>
-                    <button class="action-btn cashout-btn" onclick="cashOutBombs()">ЗАБРАТЬ</button>
+                <div id="gameInfo" style="display:none; margin-top:20px">
+                    <div style="font-size:24px; text-align:center">📈 Множитель: <span id="gameMultiplier">1.00</span>x</div>
+                    <button class="action-btn cashout-btn" onclick="cashOutBombs()">💰 ЗАБРАТЬ</button>
                 </div>
             `;
         }
@@ -252,28 +253,52 @@ HTML = '''
         
         async function placeBet() {
             let amount = currentBet || parseInt(document.getElementById('betInput')?.value || 0);
-            if(amount < 10 || amount > 10000) { tg.showPopup({title:'Ошибка', message:'Ставка от 10 до 10000'}); return; }
+            if(amount < 10 || amount > 10000) {
+                tg.showPopup({title:'Ошибка', message:'Ставка от 10 до 10000 ⭐'});
+                return;
+            }
             let data = await api('/api/crash/bet', {user_id: userId, amount: amount});
-            if(data.success) { active = true; tg.showPopup({title:'Успех', message:`Ставка ${amount}⭐ принята!`}); renderCrash(); }
-            else { tg.showPopup({title:'Ошибка', message:data.error}); }
+            if(data.success) {
+                inGame = true;
+                tg.showPopup({title:'Успех', message:`Ставка ${amount}⭐ принята!`});
+                renderCrash();
+            } else {
+                tg.showPopup({title:'Ошибка', message:data.error || 'Не удалось сделать ставку'});
+            }
         }
         
         async function cashOut() {
             let data = await api('/api/crash/cashout', {user_id: userId});
-            if(data.success) { active = false; tg.showPopup({title:'Успех', message:`Забрал ${data.win}⭐!`}); renderCrash(); }
+            if(data.success) {
+                inGame = false;
+                tg.showPopup({title:'Успех', message:`Ты забрал ${data.win}⭐!`});
+                renderCrash();
+            }
         }
         
         async function startBombsGame() {
-            if(!currentBet) { tg.showPopup({title:'Ошибка', message:'Выберите ставку!'}); return; }
-            let data = await api('/api/bombs/start', {user_id: userId, bet: currentBet, field_size: fieldSize, bombs_count: bombsCount});
-            if(data.success) { game = data.game; renderField(); }
-            else { tg.showPopup({title:'Ошибка', message:data.error}); }
+            if(!currentBet) {
+                tg.showPopup({title:'Ошибка', message:'Выберите сумму ставки!'});
+                return;
+            }
+            let data = await api('/api/bombs/start', {
+                user_id: userId,
+                bet: currentBet,
+                field_size: fieldSize,
+                bombs_count: bombsCount
+            });
+            if(data.success) {
+                game = data.game;
+                renderField();
+            } else {
+                tg.showPopup({title:'Ошибка', message:data.error});
+            }
         }
         
         function renderField() {
             let field = document.getElementById('gameField');
             field.style.display = 'grid';
-            field.style.gridTemplateColumns = `repeat(${game.field_size}, 55px)`;
+            field.style.gridTemplateColumns = `repeat(${game.field_size}, 60px)`;
             field.innerHTML = '';
             for(let i=0; i<game.total_cells; i++) {
                 let cell = document.createElement('div');
@@ -282,12 +307,14 @@ HTML = '''
                     cell.innerText = game.bomb_positions.includes(i) ? '💣' : `${game.multiplier.toFixed(1)}x`;
                     cell.classList.add('opened');
                     if(game.bomb_positions.includes(i)) cell.classList.add('bomb');
-                } else { cell.innerText = '?'; }
+                } else {
+                    cell.innerText = '?';
+                }
                 cell.onclick = () => openCell(i);
                 field.appendChild(cell);
             }
             document.getElementById('gameInfo').style.display = 'block';
-            document.getElementById('gameMultiplier').innerText = game.multiplier.toFixed(2) + 'x';
+            document.getElementById('gameMultiplier').innerText = game.multiplier.toFixed(2);
         }
         
         async function openCell(idx) {
@@ -295,31 +322,39 @@ HTML = '''
             if(data.game) {
                 game = data.game;
                 renderField();
-                if(game.status === 'lost') { tg.showPopup({title:'💥 БОМБА!', message:`Проиграл ${currentBet}⭐`}); resetBombs(); }
-                else if(game.status === 'won') { tg.showPopup({title:'🎉 ПОБЕДА!', message:`Выиграл ${Math.floor(currentBet * game.multiplier)}⭐!`}); resetBombs(); }
+                if(game.status === 'lost') {
+                    tg.showPopup({title:'💥 БОМБА!', message:`Ты проиграл ${currentBet}⭐`});
+                    resetBombs();
+                } else if(game.status === 'won') {
+                    tg.showPopup({title:'🎉 ПОБЕДА!', message:`Ты выиграл ${Math.floor(currentBet * game.multiplier)}⭐!`});
+                    resetBombs();
+                }
             }
         }
         
         async function cashOutBombs() {
             let data = await api('/api/bombs/cashout', {game_id: game.game_id});
-            if(data.success) { tg.showPopup({title:'✅', message:`Забрал ${data.win}⭐!`}); resetBombs(); }
+            if(data.success) {
+                tg.showPopup({title:'✅', message:`Ты забрал ${data.win}⭐!`});
+                resetBombs();
+            }
         }
         
         function resetBombs() { game = null; renderBombs(); }
         
         async function goBack() {
-            if(crashInterval) clearInterval(crashInterval);
+            if(updateInterval) clearInterval(updateInterval);
             view = 'main';
             renderMain();
         }
         
         async function startCrashUpdates() {
-            if(crashInterval) clearInterval(crashInterval);
-            crashInterval = setInterval(async () => {
+            if(updateInterval) clearInterval(updateInterval);
+            updateInterval = setInterval(async () => {
                 let data = await api('/api/crash/state');
                 let m = document.getElementById('multiplier');
                 if(m) m.innerText = data.multiplier.toFixed(2) + 'x';
-                if(data.running && active) {
+                if(data.running && inGame) {
                     let betBtn = document.getElementById('betBtn');
                     let cashoutBtn = document.getElementById('cashoutBtn');
                     if(betBtn) betBtn.style.display = 'none';
@@ -329,13 +364,16 @@ HTML = '''
                     let cashoutBtn = document.getElementById('cashoutBtn');
                     if(betBtn) betBtn.style.display = 'block';
                     if(cashoutBtn) cashoutBtn.style.display = 'none';
-                    active = false;
+                    inGame = false;
                 }
                 let playersDiv = document.getElementById('players');
                 if(playersDiv) {
                     playersDiv.innerHTML = '<h3>👥 Игроки</h3>';
                     for(let [id, bet] of Object.entries(data.bets)) {
-                        playersDiv.innerHTML += `<div class="player"><span>👤 ${bet.user_name}</span><span>${bet.amount}⭐</span><span>${bet.multiplier.toFixed(2)}x</span></div>`;
+                        playersDiv.innerHTML += `<div class="player-item"><span>👤 ${bet.user_name}</span><span>${bet.amount}⭐</span><span>${bet.multiplier.toFixed(2)}x</span></div>`;
+                    }
+                    if(Object.keys(data.bets).length === 0) {
+                        playersDiv.innerHTML += '<div style="text-align:center; opacity:0.5">Нет активных ставок</div>';
                     }
                 }
             }, 500);
@@ -344,12 +382,11 @@ HTML = '''
         renderMain();
     </script>
 </body>
-</html>
-'''
+</html>'''
 
-# ========== CRASH ==========
+# ========== CRASH GAME ==========
 crash_multiplier = 1.0
-crash_running = False
+crash_running = True
 crash_timer = 0
 crash_bets = {}
 crash_last_results = []
@@ -365,6 +402,12 @@ async def crash_loop():
             await asyncio.sleep(0.1)
             if random.random() < 0.10:
                 crash_running = False
+                for uid in crash_bets:
+                    if crash_bets[uid]['status'] == 'active':
+                        crash_bets[uid]['status'] = 'lost'
+                crash_last_results.append({'multiplier': crash_multiplier})
+                if len(crash_last_results) > 20:
+                    crash_last_results.pop(0)
                 crash_timer = 8
         elif crash_timer > 0:
             crash_timer -= 1
@@ -376,7 +419,7 @@ async def crash_loop():
             crash_bets = {}
         await asyncio.sleep(0.1)
 
-# ========== BOMBS ==========
+# ========== BOMBS GAME ==========
 bombs_games = {}
 
 class BombsGameObj:
@@ -418,21 +461,22 @@ class BombsGameObj:
 # ========== FLASK ==========
 @app.route('/')
 def index():
-    return HTML
+    return HTML_CONTENT
 
 @app.route('/api/balance')
 def balance():
-    return jsonify({'balance': get_balance(int(request.args.get('user_id')))})
+    uid = int(request.args.get('user_id'))
+    return {'balance': get_balance(uid)}
 
 @app.route('/api/crash/state')
 def crash_state():
-    return jsonify({
+    return {
         'multiplier': crash_multiplier,
         'running': crash_running,
         'timer': crash_timer,
         'bets': {uid: {'amount': b['amount'], 'multiplier': b['multiplier'], 'user_name': b.get('user_name', '')} for uid, b in crash_bets.items()},
         'history': crash_last_results[-10:]
-    })
+    }
 
 @app.route('/api/crash/bet', methods=['POST'])
 def crash_bet():
@@ -440,14 +484,14 @@ def crash_bet():
     uid = data['user_id']
     amt = data['amount']
     if not crash_running:
-        return jsonify({'success': False, 'error': 'Раунд не активен'})
+        return {'success': False, 'error': 'Раунд не активен'}
     if amt > get_balance(uid):
-        return jsonify({'success': False, 'error': 'Недостаточно средств'})
+        return {'success': False, 'error': 'Недостаточно средств'}
     update_balance(uid, -amt)
     cursor.execute("SELECT first_name FROM users WHERE user_id=?", (uid,))
     name = cursor.fetchone()[0]
     crash_bets[uid] = {'amount': amt, 'multiplier': 1.0, 'status': 'active', 'user_name': name}
-    return jsonify({'success': True})
+    return {'success': True}
 
 @app.route('/api/crash/cashout', methods=['POST'])
 def crash_cashout():
@@ -455,11 +499,11 @@ def crash_cashout():
     uid = data['user_id']
     bet = crash_bets.get(uid)
     if not bet or bet['status'] != 'active':
-        return jsonify({'success': False, 'error': 'Ставка не активна'})
+        return {'success': False, 'error': 'Ставка не активна'}
     win = int(bet['amount'] * bet['multiplier'])
     bet['status'] = 'cashed'
     update_balance(uid, win)
-    return jsonify({'success': True, 'win': win})
+    return {'success': True, 'win': win}
 
 @app.route('/api/bombs/start', methods=['POST'])
 def bombs_start():
@@ -469,12 +513,12 @@ def bombs_start():
     size = data['field_size']
     bombs = data['bombs_count']
     if bet > get_balance(uid):
-        return jsonify({'success': False, 'error': 'Недостаточно средств'})
+        return {'success': False, 'error': 'Недостаточно средств'}
     update_balance(uid, -bet)
     game = BombsGameObj(uid, size, bombs, bet)
     gid = int(time.time())
     bombs_games[gid] = game
-    return jsonify({'success': True, 'game': {
+    return {'success': True, 'game': {
         'game_id': gid,
         'field_size': game.field_size,
         'total_cells': game.total,
@@ -482,7 +526,7 @@ def bombs_start():
         'opened_cells': game.opened,
         'multiplier': game.get_mult(),
         'status': game.status
-    }})
+    }}
 
 @app.route('/api/bombs/open', methods=['POST'])
 def bombs_open():
@@ -491,10 +535,10 @@ def bombs_open():
     idx = data['cell_index']
     game = bombs_games.get(gid)
     if not game:
-        return jsonify({'success': False, 'error': 'Игра не найдена'})
+        return {'success': False, 'error': 'Игра не найдена'}
     win, res = game.open(idx)
     if res == 'bomb':
-        return jsonify({'success': True, 'game': {
+        return {'success': True, 'game': {
             'game_id': gid,
             'field_size': game.field_size,
             'total_cells': game.total,
@@ -502,10 +546,10 @@ def bombs_open():
             'opened_cells': game.opened,
             'multiplier': game.get_mult(),
             'status': 'lost'
-        }})
+        }}
     if res == 'win':
         update_balance(game.user_id, win)
-        return jsonify({'success': True, 'game': {
+        return {'success': True, 'game': {
             'game_id': gid,
             'field_size': game.field_size,
             'total_cells': game.total,
@@ -513,8 +557,8 @@ def bombs_open():
             'opened_cells': game.opened,
             'multiplier': game.get_mult(),
             'status': 'won'
-        }})
-    return jsonify({'success': True, 'game': {
+        }}
+    return {'success': True, 'game': {
         'game_id': gid,
         'field_size': game.field_size,
         'total_cells': game.total,
@@ -522,7 +566,7 @@ def bombs_open():
         'opened_cells': game.opened,
         'multiplier': game.get_mult(),
         'status': 'active'
-    }})
+    }}
 
 @app.route('/api/bombs/cashout', methods=['POST'])
 def bombs_cashout():
@@ -530,22 +574,22 @@ def bombs_cashout():
     gid = data['game_id']
     game = bombs_games.get(gid)
     if not game:
-        return jsonify({'success': False, 'error': 'Игра не найдена'})
+        return {'success': False, 'error': 'Игра не найдена'}
     win = game.cashout()
     if win > 0:
         update_balance(game.user_id, win)
-        return jsonify({'success': True, 'win': win})
-    return jsonify({'success': False, 'error': 'Нельзя забрать'})
+        return {'success': True, 'win': win}
+    return {'success': False, 'error': 'Нельзя забрать'}
 
 # ========== TELEGRAM ==========
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user = message.from_user
     register_user(user.id, user.username, user.first_name)
-    webapp_url = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'your-domain.railway.app')}"
+    webapp_url = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN') or 'your-domain.railway.app'}"
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(InlineKeyboardButton("🎮 ОТКРЫТЬ ИГРЫ", web_app=WebAppInfo(url=webapp_url)))
-    await message.reply(f"✨ Zenvira Gift ✨\n\n⭐ Баланс: {get_balance(user.id)}\n\n👇 Нажми на кнопку!", reply_markup=kb, parse_mode=ParseMode.HTML)
+    await message.reply(f"✨ Zenvira Gift ✨\n\n⭐ Баланс: {get_balance(user.id)}\n\n👇 Нажми на кнопку!", reply_markup=kb)
 
 # ========== ЗАПУСК ==========
 def run_flask():
@@ -554,8 +598,44 @@ def run_flask():
 
 async def on_startup(dp):
     asyncio.create_task(crash_loop())
-    print("✅ Бот запущен!")
+    print("=" * 40)
+    print("✅ БОТ ЗАПУЩЕН!")
+    print("=" * 40)
 
 if __name__ == "__main__":
+    from flask import request
+    import random, asyncio, time, secrets, sqlite3
+    from datetime import datetime
+    
+    # База данных и функции
+    conn = sqlite3.connect("zenvira.db", check_same_thread=False)
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        first_name TEXT,
+        balance INTEGER DEFAULT 500,
+        created_at TEXT
+    )
+    """)
+    conn.commit()
+    
+    def get_balance(user_id):
+        cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result else 500
+    
+    def update_balance(user_id, amount):
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+        conn.commit()
+    
+    def register_user(user_id, username, first_name):
+        cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO users (user_id, username, first_name, created_at) VALUES (?, ?, ?, ?)",
+                           (user_id, username or "Anonymous", first_name or "User", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit()
+    
     Thread(target=run_flask, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
