@@ -8,11 +8,15 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from aiogram.utils import executor
-from flask import Flask
+from flask import Flask, jsonify
 from threading import Thread
 
 API_TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8504217011"))
+
+if not API_TOKEN:
+    print("❌ Ошибка: BOT_TOKEN не найден в переменных окружения!")
+    exit(1)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
@@ -366,7 +370,7 @@ async def channel_cmd(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "chat")
 async def chat_cmd(callback: types.CallbackQuery):
     await callback.answer()
-    await bot.send_message(callback.from_user.id, "💬 **Чат поддержки:** https://t.me/zenviragift_chat", parse_mode=ParseMode.MARKDOWN)
+    await bot.send_message(callback.from_user.id, "💬 **Чат поддержки:** https://t.me/zenviragift", parse_mode=ParseMode.MARKDOWN)
 
 @dp.callback_query_handler(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: types.CallbackQuery):
@@ -909,6 +913,7 @@ def run_flask():
 async def on_startup(dp):
     asyncio.create_task(crash_game_loop())
     print("Бот Zenvira Gift успешно запущен!")
+    print(f"Bot @{(await bot.get_me()).username} готов к работе!")
 
 async def on_shutdown(dp):
     print("Бот останавливается...")
@@ -920,4 +925,4 @@ if __name__ == "__main__":
     flask_thread.start()
     
     # Запускаем бота
-    execu tor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
