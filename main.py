@@ -82,7 +82,6 @@ def get_balance(user_id):
 def update_balance(user_id, amount):
     cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
     conn.commit()
-    # Опыт и уровни
     cursor.execute("SELECT balance, level, exp FROM users WHERE user_id=?", (user_id,))
     balance, level, exp = cursor.fetchone()
     if amount > 0:
@@ -94,9 +93,6 @@ def update_balance(user_id, amount):
         else:
             cursor.execute("UPDATE users SET exp=? WHERE user_id=?", (new_exp, user_id))
         cursor.execute("UPDATE users SET total_won = total_won + ? WHERE user_id=?", (amount, user_id))
-    else:
-        # Проигрыш – опыт не убираем, но можем уменьшать? По желанию – оставим без изменений
-        pass
     conn.commit()
 
 def register_user(user_id, username, first_name):
@@ -116,17 +112,16 @@ def get_user_avatar(user_id):
     return f"https://api.dicebear.com/7.x/avataaars/svg?seed={user_id}"
 
 def get_level_percent(exp):
-    return (exp % 1000) / 10  # 0–100%
+    return (exp % 1000) / 10
 
 # ===== CRASH GAME =====
 crash_multiplier = 1.0
 crash_running = False
 crash_timer = 0
-crash_bets = {}          # user_id -> {amount, multiplier, status, user, win_amount}
+crash_bets = {}
 crash_last_results = []
 crash_message_id = None
 crash_chat_id = None
-crash_lock = asyncio.Lock()
 
 async def update_crash_message():
     global crash_message_id, crash_chat_id
@@ -151,7 +146,6 @@ async def update_crash_message():
             name = user.first_name if user else f"ID{user_id}"
             if len(name) > 15:
                 name = name[:12] + "..."
-            avatar = get_user_avatar(user_id)
             if bet["status"] == "active":
                 text += f"👤 {name} — {bet['amount']}🪙 — {bet['multiplier']:.2f}x\n"
             elif bet["status"] == "cashed":
@@ -167,7 +161,6 @@ async def update_crash_message():
 
     kb = InlineKeyboardMarkup(row_width=1)
     if crash_running:
-        # Для каждого игрока, если его ставка активна – кнопка забрать
         for user_id, bet in crash_bets.items():
             if bet["status"] == "active":
                 kb.add(InlineKeyboardButton(f"💰 ЗАБРАТЬ ({bet['multiplier']:.2f}x)", callback_data=f"crash_cashout_{user_id}"))
@@ -182,36 +175,38 @@ async def update_crash_message():
 async def crash_game_loop():
     global crash_running, crash_multiplier, crash_timer, crash_bets, crash_last_results
     while True:
-        if crash_running:
-            crash_multiplier += 0.05
-            # Обновляем множитель для активных ставок
-            for user_id, bet in crash_bets.items():
-                if bet["status"] == "active":
-                    bet["multiplier"] = crash_multiplier
-            await update_crash_message()
-            await asyncio.sleep(0.1)
-            # 10% шанс взрыва
-            if random.random() < 0.10:
-                crash_running = False
+        try:
+            if crash_running:
+                crash_multiplier += 0.05
                 for user_id, bet in crash_bets.items():
                     if bet["status"] == "active":
-                        bet["status"] = "lost"
-                crash_last_results.append({"multiplier": crash_multiplier, "time": datetime.now()})
-                if len(crash_last_results) > 20:
-                    crash_last_results.pop(0)
-                crash_timer = 8
+                        bet["multiplier"] = crash_multiplier
                 await update_crash_message()
-        elif crash_timer > 0:
-            crash_timer -= 1
-            await update_crash_message()
+                await asyncio.sleep(0.1)
+                if random.random() < 0.10:
+                    crash_running = False
+                    for user_id, bet in crash_bets.items():
+                        if bet["status"] == "active":
+                            bet["status"] = "lost"
+                    crash_last_results.append({"multiplier": crash_multiplier, "time": datetime.now()})
+                    if len(crash_last_results) > 20:
+                        crash_last_results.pop(0)
+                    crash_timer = 8
+                    await update_crash_message()
+            elif crash_timer > 0:
+                crash_timer -= 1
+                await update_crash_message()
+                await asyncio.sleep(1)
+            else:
+                crash_running = True
+                crash_multiplier = 1.0
+                crash_timer = 0
+                crash_bets = {}
+                await update_crash_message()
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"Ошибка в crash_game_loop: {e}")
             await asyncio.sleep(1)
-        else:
-            crash_running = True
-            crash_multiplier = 1.0
-            crash_timer = 0
-            crash_bets = {}
-            await update_crash_message()
-        await asyncio.sleep(0.1)
 
 # ===== BOMBS GAME =====
 class BombsGame:
@@ -269,29 +264,6 @@ class BombsGame:
         return result
 
 # ===== UPGRADE GAME =====
-class UpgradeGame:
-    def __init__(self, user_id, bet, desired_gift, gift_value, gift_rarity):
-        self.user_id = user_id
-        self.bet = bet
-        self.desired_gift = desired_gift
-        self.gift_value = gift_value
-        self.gift_rarity = gift_rarity
-        self.win_chance = random.randint(1, 85)
-        self.status = "active"
-        self.result = None
-
-    def play(self):
-        rand = random.randint(1, 100)
-        if rand <= self.win_chance:
-            self.status = "won"
-            self.result = {"win": True, "gift": self.desired_gift, "value": self.gift_value}
-            return True, self.gift_value
-        else:
-            self.status = "lost"
-            self.result = {"win": False, "gift": None}
-            return False, 0
-
-# ===== CASES DATA =====
 cases_data = {
     "common": {
         "name": "📦 ОБЫЧНЫЙ КЕЙС",
@@ -364,8 +336,12 @@ def back_button():
     kb.add(glass_button("🔙 НАЗАД", "main_menu"))
     return kb
 
-# ===== СОСТОЯНИЯ ПОЛЬЗОВАТЕЛЕЙ ДЛЯ ВВОДА =====
-user_states = {}  # user_id -> {"game": "crash"/"bombs"/"upgrade", "step": ...}
+# ===== СОСТОЯНИЯ =====
+user_states = {}
+bombs_games = {}
+bombs_temp = {}
+upgrade_games = {}
+upgrade_temp = {}
 
 # ===== ОБРАБОТЧИКИ =====
 @dp.message_handler(commands=['start'])
@@ -390,7 +366,7 @@ async def channel_cmd(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "chat")
 async def chat_cmd(callback: types.CallbackQuery):
     await callback.answer()
-    await bot.send_message(callback.from_user.id, "💬 **Чат бота:** https://t.me/zenviragift_chat", parse_mode=ParseMode.MARKDOWN)
+    await bot.send_message(callback.from_user.id, "💬 **Чат поддержки:** https://t.me/zenviragift_chat", parse_mode=ParseMode.MARKDOWN)
 
 @dp.callback_query_handler(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: types.CallbackQuery):
@@ -476,9 +452,6 @@ async def handle_crash_bet(message: types.Message):
     user_states.pop(user_id, None)
 
 # ===== BOMBS HANDLERS =====
-bombs_games = {}
-bombs_temp = {}  # user_id -> {"size": int, "bombs": int, "bet": int, "step": ...}
-
 @dp.callback_query_handler(lambda c: c.data == "game_bombs")
 async def game_bombs_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -571,7 +544,6 @@ async def bombs_take_bet(callback: types.CallbackQuery):
 
 async def start_bombs_game(message, game):
     size = game.field_size
-    cells_per_row = size
 
     text = f"💣 **BOMBS GAME**\n\n"
     text += f"📏 Поле: {size}x{size}\n"
@@ -648,7 +620,6 @@ async def bombs_open_cell(callback: types.CallbackQuery):
         await callback.answer(f"🎉 Ты выиграл {win} 🪙!", show_alert=True)
         return
 
-    # Продолжаем игру
     await start_bombs_game(callback.message, game)
     await callback.answer()
 
@@ -677,9 +648,6 @@ async def bombs_cashout(callback: types.CallbackQuery):
         await callback.answer("❌ Нельзя забрать раньше первого открытия!", show_alert=True)
 
 # ===== UPGRADE HANDLERS =====
-upgrade_games = {}
-upgrade_temp = {}  # user_id -> {"bet": int, "gift_name": str, "gift_value": int, "gift_rarity": str}
-
 @dp.callback_query_handler(lambda c: c.data == "game_upgrade")
 async def game_upgrade_menu(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -732,7 +700,6 @@ async def upgrade_gift_name(message: types.Message):
         return
     bet = upgrade_temp[user_id]["bet"]
     gift = gift_map[gift_name]
-    # Базовая ставка шанса (от 1 до 85) + бонус от подарка
     base_chance = random.randint(1, 85)
     final_chance = min(base_chance + gift["bonus"], 95)
     upgrade_games[user_id] = {
@@ -742,7 +709,6 @@ async def upgrade_gift_name(message: types.Message):
         "gift_rarity": gift["rarity"],
         "chance": final_chance
     }
-    # Визуализация круга прогресса
     filled = int(final_chance / 100 * 20)
     bar = "█" * filled + "░" * (20 - filled)
     text = f"⬆️ **UPGRADE GAME** ⬆️\n\n"
@@ -775,29 +741,24 @@ async def upgrade_play(callback: types.CallbackQuery):
     gift_value = data["gift_value"]
     gift_rarity = data["gift_rarity"]
     chance = data["chance"]
-    # Снимаем ставку (уже сняли при выборе? в upgrade_select_bet не снимали)
+    
     balance = get_balance(user_id)
     if bet > balance:
         await callback.answer("❌ Недостаточно средств!", show_alert=True)
         return
     update_balance(user_id, -bet)
 
-    # Игра
     rand = random.randint(1, 100)
     win = rand <= chance
     if win:
-        # Выиграли желаемый подарок
         add_to_inventory(user_id, gift_name.capitalize(), gift_value, "gift", gift_rarity)
         text = f"🎉 **ВЫИГРЫШ!** 🎉\n\n"
         text += f"Ты получил **{gift_name.capitalize()}** стоимостью {gift_value} 🪙!\n"
         text += f"✨ Подарок добавлен в инвентарь."
-        color = "🟢"
     else:
-        # Проигрыш – ничего не получаем
         text = f"💔 **ПРОИГРЫШ!** 💔\n\n"
         text += f"Ты не смог улучшить подарок. Ставка {bet} 🪙 сгорела.\n"
         text += f"Попробуй ещё раз!"
-        color = "🔴"
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(glass_button("🔙 В МЕНЮ", "main_menu"))
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
@@ -826,9 +787,8 @@ async def case_open(callback: types.CallbackQuery):
     if balance < case["price"]:
         await callback.answer(f"❌ Недостаточно средств! Нужно {case['price']} 🪙", show_alert=True)
         return
-    # Открытие кейса
+    
     update_balance(user_id, -case["price"])
-    # Выбор предмета с учётом шансов
     items = case["items"]
     total_chance = sum(item["chance"] for item in items)
     rand = random.randint(1, total_chance)
@@ -841,13 +801,14 @@ async def case_open(callback: types.CallbackQuery):
             break
     if not selected:
         selected = items[0]
-    # Добавляем в инвентарь
+    
     if selected["type"] == "coins":
         update_balance(user_id, selected["value"])
         result_text = f"💰 Ты выиграл {selected['name']}!"
     else:
         add_to_inventory(user_id, selected["name"], selected["value"], selected["type"], selected["rarity"])
         result_text = f"🎁 Ты получил {selected['name']} (стоимость {selected['value']} 🪙)!"
+    
     text = f"📦 **{case['name']}**\n\n{result_text}\n\n✨ Новый баланс: {get_balance(user_id)} 🪙"
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(glass_button("🔙 К КЕЙСАМ", "game_cases"))
@@ -878,14 +839,13 @@ async def show_inventory(callback: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "refill_gifts")
 async def refill_gifts_info(callback: types.CallbackQuery):
     text = "➕ **ПОПОЛНЕНИЕ ПОДАРКОВ**\n\n"
-    text += "Чтобы добавить подарки в инвентарь, напишите админу @admin (или используйте команду для админа).\n\n"
+    text += "Чтобы добавить подарки в инвентарь, напишите админу.\n\n"
     text += "Также вы можете получить подарки через кейсы и апгрейд."
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(glass_button("🔙 НАЗАД", "inventory"))
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
-# Админская команда: /add_gift <user_id> <gift_name> <value> <rarity>
 @dp.message_handler(commands=['add_gift'])
 async def admin_add_gift(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -926,6 +886,10 @@ async def show_profile(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     await callback.answer()
 
+@dp.callback_query_handler(lambda c: c.data == "noop")
+async def noop_callback(callback: types.CallbackQuery):
+    await callback.answer("🔴 Сначала открой хотя бы одну клетку!")
+
 # ===== FLASK WEB SERVER =====
 app = Flask(__name__)
 
@@ -933,16 +897,27 @@ app = Flask(__name__)
 def index():
     return "Zenvira Gift Bot is running!"
 
+@app.route('/health')
+def health():
+    return "OK", 200
+
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # ===== ЗАПУСК =====
 async def on_startup(dp):
     asyncio.create_task(crash_game_loop())
-    print("Бот запущен!")
+    print("Бот Zenvira Gift успешно запущен!")
+
+async def on_shutdown(dp):
+    print("Бот останавливается...")
+    await bot.close()
 
 if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке
-    Thread(target=run_flask, daemon=True).start()
+    # Запускаем Flask в отдельном потоке для Railway
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
     # Запускаем бота
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
