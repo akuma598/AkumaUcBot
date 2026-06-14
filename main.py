@@ -20,6 +20,9 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
+# ID фотографии
+PHOTO_ID = "AgACAgIAAxkBAAEqq-5qLrP5zJdyZj2-Jxl3Fy-zs7ekuQACRxlrGwHycEmgNUvLeaY5XgEAAwIAA3MAAzwE"
+
 # ===== БАЗА ДАННЫХ =====
 conn = sqlite3.connect("zenvira.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -63,17 +66,41 @@ CREATE TABLE IF NOT EXISTS inventory (
 )
 """)
 
-# Таблица транзакций подарков
+# Таблица магазина
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS gift_transactions (
+CREATE TABLE IF NOT EXISTS shop_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sender_id INTEGER,
-    receiver_id INTEGER,
-    gift_name TEXT,
+    name TEXT,
+    description TEXT,
+    price_stars INTEGER,
+    price_coins INTEGER,
     gift_value INTEGER,
-    message TEXT,
-    is_anonymous INTEGER DEFAULT 0,
-    created_at TEXT
+    gift_rarity TEXT,
+    is_limited INTEGER DEFAULT 0,
+    stock INTEGER DEFAULT -1,
+    image_url TEXT
+)
+""")
+
+# Таблица достижений
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS achievements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    description TEXT,
+    required_value INTEGER,
+    reward_stars INTEGER,
+    icon TEXT
+)
+""")
+
+# Таблица полученных достижений
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS user_achievements (
+    user_id INTEGER,
+    achievement_id INTEGER,
+    unlocked_at TEXT,
+    PRIMARY KEY (user_id, achievement_id)
 )
 """)
 
@@ -101,44 +128,6 @@ CREATE TABLE IF NOT EXISTS raffle_tickets (
 )
 """)
 
-# Таблица достижений
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS achievements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    description TEXT,
-    required_value INTEGER,
-    reward_stars INTEGER,
-    icon TEXT
-)
-""")
-
-# Таблица полученных достижений
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS user_achievements (
-    user_id INTEGER,
-    achievement_id INTEGER,
-    unlocked_at TEXT,
-    PRIMARY KEY (user_id, achievement_id)
-)
-""")
-
-# Таблица магазина
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS shop_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    description TEXT,
-    price_stars INTEGER,
-    price_coins INTEGER,
-    gift_value INTEGER,
-    gift_rarity TEXT,
-    is_limited INTEGER DEFAULT 0,
-    stock INTEGER DEFAULT -1,
-    image_url TEXT
-)
-""")
-
 # Таблица ставок Crash
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS crash_bets (
@@ -152,43 +141,28 @@ CREATE TABLE IF NOT EXISTS crash_bets (
 )
 """)
 
-# Таблица игр Bombs
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS bombs_games (
-    game_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    field_size INTEGER,
-    bombs_count INTEGER,
-    bet INTEGER,
-    win INTEGER DEFAULT 0,
-    status TEXT,
-    created_at TEXT
-)
-""")
+conn.commit()
 
 # ===== ДОБАВЛЯЕМ СТАНДАРТНЫЕ ДАННЫЕ =====
 
-# Добавляем товары в магазин
+# Товары в магазин
 cursor.execute("SELECT COUNT(*) FROM shop_items")
 if cursor.fetchone()[0] == 0:
     items = [
-        ("🌹 Цветок", "Красивый цветок для подарка", 50, 0, 50, "common", 0, -1, None),
+        ("🌹 Цветок", "Красивый цветок", 50, 0, 50, "common", 0, -1, None),
         ("❤️ Сердце", "Тёплое сердечко", 100, 0, 100, "common", 0, -1, None),
         ("⭐ Звезда", "Сияющая звезда", 250, 0, 250, "rare", 0, -1, None),
         ("👑 Корона", "Королевская корона", 500, 0, 500, "rare", 0, -1, None),
-        ("💎 Алмаз", "Бриллиант чистой воды", 1000, 0, 1000, "epic", 0, -1, None),
+        ("💎 Алмаз", "Бриллиант", 1000, 0, 1000, "epic", 0, -1, None),
         ("🚀 Ракета", "Космическая ракета", 2500, 0, 2500, "epic", 0, -1, None),
         ("🌈 Радуга", "Разноцветная радуга", 5000, 0, 5000, "legendary", 0, -1, None),
         ("🦄 Единорог", "Магический единорог", 10000, 0, 10000, "legendary", 0, -1, None),
-        ("🐉 Дракон", "Огнедышащий дракон", 25000, 0, 25000, "nft", 0, -1, None),
-        ("🔥 Феникс", "Бессмертный феникс", 50000, 0, 50000, "ultra", 0, -1, None),
-        ("🎨 NFT Подарок", "Уникальный цифровой подарок", 100000, 0, 100000, "exclusive", 0, -1, None),
     ]
     for item in items:
         cursor.execute("INSERT INTO shop_items (name, description, price_stars, price_coins, gift_value, gift_rarity, is_limited, stock, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", item)
     conn.commit()
 
-# Добавляем достижения
+# Достижения
 cursor.execute("SELECT COUNT(*) FROM achievements")
 if cursor.fetchone()[0] == 0:
     achievements = [
@@ -197,15 +171,12 @@ if cursor.fetchone()[0] == 0:
         ("👑 Король подарков", "Отправить 100 подарков", 100, 5000, "👑"),
         ("🏆 Легенда", "Достичь 10 уровня", 10, 10000, "🏆"),
         ("💎 Миллионер", "Накопить 1,000,000 Stars", 1000000, 50000, "💎"),
-        ("🎮 Игроман", "Выиграть 100 игр", 100, 2500, "🎮"),
-        ("🚀 Мастер Crash", "Забрать выигрыш при x10", 10, 5000, "🚀"),
-        ("💣 Сапёр", "Выиграть в Bombs 50 раз", 50, 7500, "💣"),
     ]
     for ach in achievements:
         cursor.execute("INSERT INTO achievements (name, description, required_value, reward_stars, icon) VALUES (?, ?, ?, ?, ?)", ach)
     conn.commit()
 
-# Создаём текущий розыгрыш
+# Текущий розыгрыш
 cursor.execute("SELECT COUNT(*) FROM raffles WHERE ended_at IS NULL")
 if cursor.fetchone()[0] == 0:
     week_num = datetime.now().isocalendar()[1]
@@ -221,26 +192,21 @@ def get_balance(user_id):
     result = cursor.fetchone()
     return result[0] if result else 500
 
-def update_balance(user_id, amount_stars=0, amount_coins=0):
-    if amount_stars != 0:
-        cursor.execute("UPDATE users SET balance_stars = balance_stars + ? WHERE user_id=?", (amount_stars, user_id))
-    if amount_coins != 0:
-        cursor.execute("UPDATE users SET balance_coins = balance_coins + ? WHERE user_id=?", (amount_coins, user_id))
+def update_balance(user_id, amount):
+    cursor.execute("UPDATE users SET balance_stars = balance_stars + ? WHERE user_id=?", (amount, user_id))
     conn.commit()
-    
-    if amount_stars > 0:
+    if amount > 0:
+        cursor.execute("UPDATE users SET total_won = total_won + ? WHERE user_id=?", (amount, user_id))
         cursor.execute("SELECT level, exp FROM users WHERE user_id=?", (user_id,))
         level, exp = cursor.fetchone()
-        new_exp = exp + amount_stars // 10
+        new_exp = exp + amount // 10
         if new_exp >= 1000:
             new_level = level + new_exp // 1000
             new_exp = new_exp % 1000
             cursor.execute("UPDATE users SET level=?, exp=? WHERE user_id=?", (new_level, new_exp, user_id))
         else:
             cursor.execute("UPDATE users SET exp=? WHERE user_id=?", (new_exp, user_id))
-        cursor.execute("UPDATE users SET total_won = total_won + ? WHERE user_id=?", (amount_stars, user_id))
     conn.commit()
-    check_achievements(user_id)
 
 def register_user(user_id, username, first_name, ref_code=None):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
@@ -366,7 +332,7 @@ async def update_crash_message():
         for user_id, bet in crash_bets.items():
             if bet["status"] == "active":
                 kb.add(InlineKeyboardButton(f"💰 ЗАБРАТЬ ({bet['multiplier']:.2f}x)", callback_data=f"crash_cashout_{user_id}"))
-    kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_games_menu"))
+    kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_main"))
 
     try:
         if crash_message_id:
@@ -468,51 +434,9 @@ class BombsGame:
 bombs_games = {}
 bombs_temp = {}
 
-# ===== КЕЙСЫ (CASES) =====
-cases_data = {
-    "common": {
-        "name": "📦 ОБЫЧНЫЙ КЕЙС",
-        "price": 100,
-        "color": "#6c5ce7",
-        "items": [
-            {"name": "50 ⭐", "value": 50, "chance": 30, "type": "stars", "rarity": "common"},
-            {"name": "100 ⭐", "value": 100, "chance": 25, "type": "stars", "rarity": "common"},
-            {"name": "200 ⭐", "value": 200, "chance": 20, "type": "stars", "rarity": "common"},
-            {"name": "🎁 ОБЫЧНЫЙ ПОДАРОК", "value": 500, "chance": 15, "type": "gift", "rarity": "common"},
-            {"name": "🎁 РЕДКИЙ ПОДАРОК", "value": 1000, "chance": 8, "type": "gift", "rarity": "rare"},
-            {"name": "🎁 ЭПИЧЕСКИЙ ПОДАРОК", "value": 2500, "chance": 2, "type": "gift", "rarity": "epic"}
-        ]
-    },
-    "rare": {
-        "name": "💎 РЕДКИЙ КЕЙС",
-        "price": 500,
-        "color": "#00b894",
-        "items": [
-            {"name": "200 ⭐", "value": 200, "chance": 30, "type": "stars", "rarity": "common"},
-            {"name": "500 ⭐", "value": 500, "chance": 25, "type": "stars", "rarity": "common"},
-            {"name": "🎁 РЕДКИЙ ПОДАРОК", "value": 1000, "chance": 20, "type": "gift", "rarity": "rare"},
-            {"name": "🎁 ЭПИЧЕСКИЙ ПОДАРОК", "value": 2500, "chance": 15, "type": "gift", "rarity": "epic"},
-            {"name": "🎁 ЛЕГЕНДАРНЫЙ ПОДАРОК", "value": 5000, "chance": 8, "type": "gift", "rarity": "legendary"},
-            {"name": "🎁 NFT ПОДАРОК", "value": 10000, "chance": 2, "type": "gift", "rarity": "nft"}
-        ]
-    },
-    "legendary": {
-        "name": "👑 ЛЕГЕНДАРНЫЙ КЕЙС",
-        "price": 2000,
-        "color": "#e17055",
-        "items": [
-            {"name": "500 ⭐", "value": 500, "chance": 30, "type": "stars", "rarity": "common"},
-            {"name": "🎁 ЭПИЧЕСКИЙ ПОДАРОК", "value": 2500, "chance": 25, "type": "gift", "rarity": "epic"},
-            {"name": "🎁 ЛЕГЕНДАРНЫЙ ПОДАРОК", "value": 5000, "chance": 20, "type": "gift", "rarity": "legendary"},
-            {"name": "🎁 NFT ПОДАРОК", "value": 10000, "chance": 15, "type": "gift", "rarity": "nft"},
-            {"name": "🎁 УЛЬТРА ПОДАРОК", "value": 25000, "chance": 8, "type": "gift", "rarity": "ultra"},
-            {"name": "🎁 ЭКСКЛЮЗИВ", "value": 50000, "chance": 2, "type": "gift", "rarity": "exclusive"}
-        ]
-    }
-}
-
 # ===== КЛАВИАТУРЫ =====
 
+# Стартовое меню
 def start_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -521,51 +445,33 @@ def start_menu():
     )
     return kb
 
-def games_menu():
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("🎁 Отправить подарок", callback_data="send_gift"),
-        InlineKeyboardButton("📦 Магазин", callback_data="shop"),
-    )
-    kb.add(
-        InlineKeyboardButton("🎮 Игры", callback_data="games_list"),
-        InlineKeyboardButton("🏆 Рейтинг", callback_data="leaderboard"),
-    )
-    kb.add(
-        InlineKeyboardButton("👤 Профиль", callback_data="profile"),
-        InlineKeyboardButton("👥 Рефералы", callback_data="referral"),
-    )
-    kb.add(
-        InlineKeyboardButton("🎁 Розыгрыш", callback_data="raffle_info"),
-        InlineKeyboardButton("📦 Кейсы", callback_data="cases_menu"),
-    )
-    kb.add(
-        InlineKeyboardButton("🎒 Инвентарь", callback_data="inventory"),
-        InlineKeyboardButton("🏆 Достижения", callback_data="achievements"),
-    )
-    kb.add(
-        InlineKeyboardButton("📢 Канал", callback_data="channel"),
-    )
-    return kb
-
-def games_list_menu():
+# Главное игровое меню
+def main_menu():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
         InlineKeyboardButton("🚀 CRASH", callback_data="game_crash"),
         InlineKeyboardButton("💣 BOMBS", callback_data="game_bombs"),
         InlineKeyboardButton("⬆️ UPGRADE", callback_data="game_upgrade"),
+        InlineKeyboardButton("📦 МАГАЗИН", callback_data="shop"),
+        InlineKeyboardButton("👤 ПРОФИЛЬ", callback_data="profile"),
+        InlineKeyboardButton("👥 РЕФЕРАЛЫ", callback_data="referral"),
+        InlineKeyboardButton("🏆 РЕЙТИНГ", callback_data="leaderboard"),
+        InlineKeyboardButton("🎁 РОЗЫГРЫШ", callback_data="raffle"),
+        InlineKeyboardButton("🎒 ИНВЕНТАРЬ", callback_data="inventory"),
+        InlineKeyboardButton("🏆 ДОСТИЖЕНИЯ", callback_data="achievements"),
     )
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_games_menu"))
+    kb.add(InlineKeyboardButton("📢 КАНАЛ", callback_data="channel"))
     return kb
 
 def back_button():
     kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_games_menu"))
+    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
     return kb
 
 # ===== ОБРАБОТЧИКИ =====
 user_data = {}
 
+# /start с фото
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user = message.from_user
@@ -583,8 +489,14 @@ async def start_cmd(message: types.Message):
         "👉 <a href='https://t.me/zenviragift'>Подпишись на канал</a>"
     )
     
-    await message.reply(text, reply_markup=start_menu(), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    await message.reply_photo(
+        photo=PHOTO_ID,
+        caption=text,
+        reply_markup=start_menu(),
+        parse_mode=ParseMode.HTML
+    )
 
+# Кнопка КАНАЛ
 @dp.callback_query_handler(lambda c: c.data == "channel")
 async def channel_button(callback: types.CallbackQuery):
     await callback.answer()
@@ -592,62 +504,50 @@ async def channel_button(callback: types.CallbackQuery):
         "📢 <b>Наш канал:</b>\nhttps://t.me/zenviragift\n\nПодпишись, чтобы не пропустить новые розыгрыши!",
         parse_mode=ParseMode.HTML)
 
+# Кнопка ИГРАТЬ - ГЛАВНАЯ ФУНКЦИЯ
 @dp.callback_query_handler(lambda c: c.data == "play")
 async def play_button(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     balance = get_balance(user_id)
     cursor.execute("SELECT level FROM users WHERE user_id=?", (user_id,))
-    level = cursor.fetchone()[0]
+    result = cursor.fetchone()
+    level = result[0] if result else 1
     
     text = (
         f"🎮 <b>Zenvira Gift</b> 🎮\n\n"
         f"👤 <b>{callback.from_user.first_name}</b>\n"
         f"⭐ Баланс: <b>{balance}</b>\n"
         f"🎚️ Уровень: <b>{level}</b>\n\n"
-        f"👇 <b>Выберите действие:</b>"
+        f"👇 <b>Выберите игру или действие:</b>"
     )
     
     await callback.message.edit_caption(
         caption=text,
-        reply_markup=games_menu(),
+        reply_markup=main_menu(),
         parse_mode=ParseMode.HTML
     )
     await callback.answer()
 
-@dp.callback_query_handler(lambda c: c.data == "back_to_games_menu")
-async def back_to_games(callback: types.CallbackQuery):
+# Кнопка НАЗАД
+@dp.callback_query_handler(lambda c: c.data == "back_to_main")
+async def back_to_main(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     balance = get_balance(user_id)
     cursor.execute("SELECT level FROM users WHERE user_id=?", (user_id,))
-    level = cursor.fetchone()[0]
+    result = cursor.fetchone()
+    level = result[0] if result else 1
     
     text = (
         f"🎮 <b>Zenvira Gift</b> 🎮\n\n"
         f"👤 <b>{callback.from_user.first_name}</b>\n"
         f"⭐ Баланс: <b>{balance}</b>\n"
         f"🎚️ Уровень: <b>{level}</b>\n\n"
-        f"👇 <b>Выберите действие:</b>"
+        f"👇 <b>Выберите игру или действие:</b>"
     )
     
     await callback.message.edit_caption(
         caption=text,
-        reply_markup=games_menu(),
-        parse_mode=ParseMode.HTML
-    )
-    await callback.answer()
-
-# ===== ИГРЫ =====
-@dp.callback_query_handler(lambda c: c.data == "games_list")
-async def games_list_button(callback: types.CallbackQuery):
-    text = "🎮 <b>ДОСТУПНЫЕ ИГРЫ</b>\n\n"
-    text += "🚀 <b>CRASH</b> — ракетный множитель, забирай вовремя!\n"
-    text += "💣 <b>BOMBS</b> — найди бомбы и умножай ставку!\n"
-    text += "⬆️ <b>UPGRADE</b> — улучшай подарки с шансом!\n\n"
-    text += "Выберите игру:"
-    
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=games_list_menu(),
+        reply_markup=main_menu(),
         parse_mode=ParseMode.HTML
     )
     await callback.answer()
@@ -689,7 +589,6 @@ async def crash_cashout(callback: types.CallbackQuery):
     bet["status"] = "cashed"
     bet["win_amount"] = win_amount
     update_balance(user_id, win_amount)
-    add_raffle_ticket(user_id, win_amount // 100)
     
     await callback.answer(f"✅ Ты забрал {win_amount} ⭐!", show_alert=True)
     await update_crash_message()
@@ -740,9 +639,8 @@ async def game_bombs_menu(callback: types.CallbackQuery):
     kb.add(
         InlineKeyboardButton("3x3 (до 8 бомб)", "bombs_size_3"),
         InlineKeyboardButton("5x5 (до 24 бомб)", "bombs_size_5"),
-        InlineKeyboardButton("10x10 (до 99 бомб)", "bombs_size_10")
     )
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="games_list"))
+    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
@@ -756,10 +654,10 @@ async def bombs_select_size(callback: types.CallbackQuery):
     text += f"📏 Размер поля: {size}x{size}\n\n"
     text += "💣 **Выбери количество бомб:**"
     
-    max_bombs = {"3": 8, "5": 24, "10": 99}[size]
+    max_bombs = {"3": 8, "5": 24}[size]
     kb = InlineKeyboardMarkup(row_width=4)
     row = []
-    for i in range(1, min(max_bombs + 1, 17)):
+    for i in range(1, min(max_bombs + 1, 9)):
         row.append(InlineKeyboardButton(str(i), callback_data=f"bombs_set_{size}_{i}"))
         if len(row) == 4:
             kb.row(*row)
@@ -838,7 +736,7 @@ async def start_bombs_game(message, game):
     if game.opened == 0:
         cashout_btn = InlineKeyboardButton(f"⏳ НАЧНИ ИГРУ", callback_data="noop")
     kb.add(cashout_btn)
-    kb.add(InlineKeyboardButton("🔙 МЕНЮ", callback_data="games_list"))
+    kb.add(InlineKeyboardButton("🔙 МЕНЮ", callback_data="back_to_main"))
     
     await message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
 
@@ -876,14 +774,13 @@ async def bombs_open_cell(callback: types.CallbackQuery):
         text += f"💀 Ты проиграл {game.bet} ⭐"
         kb = InlineKeyboardMarkup(row_width=1)
         kb.add(InlineKeyboardButton("🔙 ИГРАТЬ СНОВА", callback_data="game_bombs"))
-        kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_games_menu"))
+        kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_main"))
         await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
         await callback.answer("💥 БАХ! Ты наткнулся на бомбу!", show_alert=True)
         return
     
     if win > 0:
         update_balance(game.user_id, win)
-        add_raffle_ticket(game.user_id, win // 100)
         text = f"🎉 **ТЫ ВЫИГРАЛ!** 🎉\n\n"
         text += f"📏 Поле: {game.field_size}x{game.field_size}\n"
         text += f"💰 Ставка: {game.bet} ⭐\n"
@@ -892,7 +789,7 @@ async def bombs_open_cell(callback: types.CallbackQuery):
         text += f"✨ Новый баланс: {get_balance(game.user_id)} ⭐"
         kb = InlineKeyboardMarkup(row_width=1)
         kb.add(InlineKeyboardButton("🔙 ИГРАТЬ СНОВА", callback_data="game_bombs"))
-        kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_games_menu"))
+        kb.add(InlineKeyboardButton("🔙 ГЛАВНОЕ МЕНЮ", callback_data="back_to_main"))
         await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
         await callback.answer(f"🎉 Ты выиграл {win} ⭐!", show_alert=True)
         return
@@ -913,7 +810,6 @@ async def bombs_cashout(callback: types.CallbackQuery):
     win = game.cashout()
     if win > 0:
         update_balance(game.user_id, win)
-        add_raffle_ticket(game.user_id, win // 100)
         text = f"💰 **ТЫ ЗАБРАЛ ВЫИГРЫШ!** 💰\n\n"
         text += f"📏 Поле: {game.field_size}x{game.field_size}\n"
         text += f"💰 Ставка: {game.bet} ⭐\n"
@@ -936,9 +832,9 @@ async def game_upgrade_menu(callback: types.CallbackQuery):
     text += "🎮 **Выбери сумму ставки:**"
     
     kb = InlineKeyboardMarkup(row_width=3)
-    for amount in [10, 50, 100, 200, 500, 1000, 2500, 5000]:
+    for amount in [10, 50, 100, 200, 500, 1000]:
         kb.insert(InlineKeyboardButton(f"{amount}⭐", callback_data=f"upgrade_bet_{amount}"))
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="games_list"))
+    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
     
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
@@ -958,11 +854,11 @@ async def upgrade_select_bet(callback: types.CallbackQuery):
     text = "⬆️ **UPGRADE GAME**\n\n"
     text += f"💰 Ставка: {amount} ⭐\n\n"
     text += "🎁 **Выбери желаемый подарок:**\n"
-    text += "• 🎁 ПРОСТОЙ ПОДАРОК — +5% шанса (стоимость 500⭐)\n"
-    text += "• 🎁 РЕДКИЙ ПОДАРОК — +10% (стоимость 1000⭐)\n"
-    text += "• 🎁 ЭПИЧЕСКИЙ ПОДАРОК — +15% (стоимость 2500⭐)\n"
-    text += "• 🎁 ЛЕГЕНДАРНЫЙ ПОДАРОК — +25% (стоимость 5000⭐)\n"
-    text += "• 🎁 NFT ПОДАРОК — +50% (стоимость 10000⭐)\n\n"
+    text += "• 🎁 ПРОСТОЙ ПОДАРОК — +5% шанса\n"
+    text += "• 🎁 РЕДКИЙ ПОДАРОК — +10%\n"
+    text += "• 🎁 ЭПИЧЕСКИЙ ПОДАРОК — +15%\n"
+    text += "• 🎁 ЛЕГЕНДАРНЫЙ ПОДАРОК — +25%\n"
+    text += "• 🎁 NFT ПОДАРОК — +50%\n\n"
     text += "📝 **Введи название подарка:**"
     
     await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
@@ -1011,7 +907,7 @@ async def upgrade_gift_name(message: types.Message):
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
         InlineKeyboardButton("✅ ДА", callback_data="upgrade_play"),
-        InlineKeyboardButton("❌ НЕТ", callback_data="back_to_games_menu")
+        InlineKeyboardButton("❌ НЕТ", callback_data="back_to_main")
     )
     
     await message.reply(text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
@@ -1039,7 +935,6 @@ async def upgrade_play(callback: types.CallbackQuery):
     
     if win:
         add_to_inventory(user_id, gift_data["name"].capitalize(), gift_data["value"], "gift", gift_data["rarity"])
-        add_raffle_ticket(user_id, gift_data["value"] // 100)
         text = f"🎉 **ВЫИГРЫШ!** 🎉\n\n"
         text += f"Ты получил **{gift_data['name'].capitalize()}** стоимостью {gift_data['value']} ⭐!\n"
         text += f"✨ Подарок добавлен в инвентарь."
@@ -1049,157 +944,32 @@ async def upgrade_play(callback: types.CallbackQuery):
         text += f"Попробуй ещё раз!"
     
     kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 В МЕНЮ", callback_data="back_to_games_menu"))
+    kb.add(InlineKeyboardButton("🔙 В МЕНЮ", callback_data="back_to_main"))
     
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
     user_data.pop(user_id, None)
-    await callback.answer()
-
-# ===== КЕЙСЫ (CASES) =====
-@dp.callback_query_handler(lambda c: c.data == "cases_menu")
-async def cases_menu(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    balance = get_balance(user_id)
-    
-    text = f"📦 **КЕЙСЫ Zenvira**\n\n"
-    text += f"💰 Ваш баланс: {balance} ⭐\n\n"
-    text += "Выберите кейс для открытия:\n\n"
-    
-    kb = InlineKeyboardMarkup(row_width=1)
-    for key, case in cases_data.items():
-        kb.add(InlineKeyboardButton(f"{case['name']} — {case['price']}⭐", callback_data=f"case_open_{key}"))
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_games_menu"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.HTML)
-    await callback.answer()
-
-@dp.callback_query_handler(lambda c: c.data.startswith("case_open_"))
-async def case_open(callback: types.CallbackQuery):
-    case_key = callback.data.split("_")[2]
-    case = cases_data[case_key]
-    user_id = callback.from_user.id
-    balance = get_balance(user_id)
-    
-    if balance < case["price"]:
-        await callback.answer(f"❌ Недостаточно Stars! Нужно: {case['price']}⭐", show_alert=True)
-        return
-    
-    update_balance(user_id, -case["price"])
-    
-    # Выбор случайного предмета из кейса
-    items = case["items"]
-    total_chance = sum(item["chance"] for item in items)
-    rand = random.randint(1, total_chance)
-    cumulative = 0
-    selected = None
-    for item in items:
-        cumulative += item["chance"]
-        if rand <= cumulative:
-            selected = item
-            break
-    
-    if not selected:
-        selected = items[0]
-    
-    # Анимация открытия кейса
-    msg_text = f"🎲 <b>ОТКРЫВАЕМ {case['name']}...</b>\n\n"
-    for i in range(3):
-        msg_text += "🌀 "
-        await callback.message.edit_caption(caption=msg_text, parse_mode=ParseMode.HTML)
-        await asyncio.sleep(0.5)
-    
-    if selected["type"] == "stars":
-        update_balance(user_id, selected["value"])
-        result_text = f"💰 Ты выиграл {selected['name']}!"
-    else:
-        add_to_inventory(user_id, selected["name"], selected["value"], selected["type"], selected["rarity"])
-        result_text = f"🎁 Ты получил {selected['name']} (стоимость {selected['value']} ⭐)!"
-    
-    text = f"📦 **{case['name']}**\n\n"
-    text += f"{result_text}\n\n"
-    text += f"✨ Новый баланс: {get_balance(user_id)} ⭐"
-    
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 К КЕЙСАМ", callback_data="cases_menu"))
-    kb.add(InlineKeyboardButton("🏠 ГЛАВНОЕ МЕНЮ", callback_data="back_to_games_menu"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.HTML)
-    await callback.answer(f"🎉 {result_text}", show_alert=True)
-
-# ===== ИНВЕНТАРЬ =====
-@dp.callback_query_handler(lambda c: c.data == "inventory")
-async def show_inventory(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    cursor.execute("SELECT gift_name, gift_value, gift_rarity, obtained_at FROM inventory WHERE user_id=?", (user_id,))
-    items = cursor.fetchall()
-    
-    if not items:
-        text = "🎒 **ИНВЕНТАРЬ**\n\nУ тебя пока нет подарков.\n\n"
-        text += "Как получить подарки?\n"
-        text += "• Открывай кейсы\n"
-        text += "• Выигрывай в игре Upgrade\n"
-        text += "• Покупай в магазине"
-    else:
-        text = f"🎒 **ИНВЕНТАРЬ**\n\nВсего подарков: {len(items)}\n\n"
-        for name, value, rarity, date in items[:20]:  # Показываем последние 20
-            text += f"• {name} — {value}⭐ ({rarity})\n"
-        if len(items) > 20:
-            text += f"\n... и ещё {len(items) - 20} подарков"
-    
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_games_menu"))
-    
-    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-# ===== ДОСТИЖЕНИЯ =====
-@dp.callback_query_handler(lambda c: c.data == "achievements")
-async def show_achievements(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    
-    cursor.execute("SELECT id, name, description, required_value, reward_stars, icon FROM achievements")
-    all_achievements = cursor.fetchall()
-    
-    cursor.execute("SELECT achievement_id FROM user_achievements WHERE user_id=?", (user_id,))
-    unlocked = {row[0] for row in cursor.fetchall()}
-    
-    text = "🏆 **ВАШИ ДОСТИЖЕНИЯ**\n\n"
-    
-    for ach_id, name, desc, required, reward, icon in all_achievements:
-        if ach_id in unlocked:
-            text += f"✅ {icon} <b>{name}</b> — {desc} (+{reward}⭐)\n"
-        else:
-            text += f"🔒 {icon} {name} — {desc} (+{reward}⭐)\n"
-    
-    text += "\n<i>Открывайте достижения, чтобы получать бонусные Stars!</i>"
-    
-    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 # ===== ПРОФИЛЬ =====
 @dp.callback_query_handler(lambda c: c.data == "profile")
 async def profile_button(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    cursor.execute("SELECT balance_stars, balance_coins, level, exp, total_won, total_spent, gifts_sent, gifts_received, created_at FROM users WHERE user_id=?", (user_id,))
+    cursor.execute("SELECT balance_stars, level, exp, total_won, created_at FROM users WHERE user_id=?", (user_id,))
     data = cursor.fetchone()
     
     if data:
-        balance_stars, balance_coins, level, exp, total_won, total_spent, gifts_sent, gifts_received, created_at = data
+        balance, level, exp, total_won, created_at = data
         current_exp = exp % 1000
         next_exp = 1000 - current_exp if current_exp > 0 else 1000
         
         text = f"👤 <b>ПРОФИЛЬ</b>\n\n"
         text += f"📛 Имя: {callback.from_user.first_name}\n"
         text += f"🆔 ID: {user_id}\n\n"
-        text += f"⭐ Stars: <b>{balance_stars}</b>\n"
-        text += f"🪙 Coins: <b>{balance_coins}</b>\n\n"
+        text += f"⭐ Баланс: <b>{balance}</b>\n"
         text += f"🎚️ Уровень: <b>{level}</b>\n"
         text += f"📊 Опыт: {current_exp}/1000\n"
         text += f"➡️ До уровня: {next_exp} опыта\n\n"
         text += f"🏆 Всего выиграно: <b>{total_won}</b> ⭐\n"
-        text += f"💸 Всего потрачено: <b>{total_spent}</b> ⭐\n\n"
-        text += f"🎁 Подарков отправлено: <b>{gifts_sent}</b>\n"
-        text += f"🎁 Подарков получено: <b>{gifts_received}</b>\n\n"
         text += f"📅 Регистрация: {created_at}"
     else:
         text = "👤 <b>ПРОФИЛЬ</b>\n\nДанные не найдены"
@@ -1232,13 +1002,12 @@ async def referral_button(callback: types.CallbackQuery):
         text += f"🔗 <b>Ваша ссылка:</b>\n"
         text += f"<code>{link}</code>\n\n"
         text += f"✨ <b>Бонусы:</b>\n"
-        text += f"• 100⭐ за каждого приглашённого друга\n"
-        text += f"• 10% от выигрышей друга\n\n"
+        text += f"• 100⭐ за каждого приглашённого друга\n\n"
         text += f"<i>Отправьте ссылку друзьям и получайте награды!</i>"
         
         kb = InlineKeyboardMarkup(row_width=1)
         kb.add(InlineKeyboardButton("📤 Поделиться", url=f"https://t.me/share/url?url={link}&text=🎁 Отличный бот с подарками! Присоединяйся!"))
-        kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_games_menu"))
+        kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
         
         await callback.message.edit_caption(
             caption=text,
@@ -1250,22 +1019,21 @@ async def referral_button(callback: types.CallbackQuery):
 # ===== МАГАЗИН =====
 @dp.callback_query_handler(lambda c: c.data == "shop")
 async def shop_button(callback: types.CallbackQuery):
-    cursor.execute("SELECT id, name, description, price_stars, gift_value, gift_rarity FROM shop_items")
+    cursor.execute("SELECT id, name, price_stars, gift_value FROM shop_items")
     items = cursor.fetchall()
     
     text = "📦 <b>МАГАЗИН ПОДАРКОВ</b>\n\n"
-    text += "Купите подарок и отправьте его другу!\n\n"
+    text += "Купите подарок и он добавится в инвентарь!\n\n"
     
-    for item in items[:8]:
-        text += f"{item[1]} — {item[3]}⭐ (подарок на {item[4]}⭐)\n"
+    for item in items:
+        text += f"• {item[1]} — {item[2]}⭐ (подарок на {item[3]}⭐)\n"
     
-    text += f"\n💰 Ваш баланс: {get_balance(callback.from_user.id)} ⭐\n"
-    text += "\n<i>Скоро добавятся новые подарки и скидки!</i>"
+    text += f"\n💰 Ваш баланс: {get_balance(callback.from_user.id)} ⭐"
     
     kb = InlineKeyboardMarkup(row_width=2)
-    for item in items[:6]:
+    for item in items:
         kb.insert(InlineKeyboardButton(f"💰 {item[1]}", callback_data=f"buy_{item[0]}"))
-    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_games_menu"))
+    kb.add(InlineKeyboardButton("🔙 НАЗАД", callback_data="back_to_main"))
     
     await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode=ParseMode.HTML)
     await callback.answer()
@@ -1307,25 +1075,10 @@ async def leaderboard_button(callback: types.CallbackQuery):
     cursor.execute("SELECT first_name, balance_stars, level FROM users ORDER BY balance_stars DESC LIMIT 10")
     top_balance = cursor.fetchall()
     
-    cursor.execute("SELECT first_name, total_won FROM users ORDER BY total_won DESC LIMIT 10")
-    top_won = cursor.fetchall()
-    
-    cursor.execute("SELECT first_name, gifts_sent FROM users ORDER BY gifts_sent DESC LIMIT 10")
-    top_gifts = cursor.fetchall()
-    
     text = "🏆 <b>РЕЙТИНГ ПОЛЬЗОВАТЕЛЕЙ</b>\n\n"
-    
     text += "📊 <b>По балансу:</b>\n"
     for i, (name, balance, level) in enumerate(top_balance, 1):
         text += f"{i}. {name[:15]} — {balance} ⭐ (lvl {level})\n"
-    
-    text += "\n🎁 <b>По выигрышам:</b>\n"
-    for i, (name, won) in enumerate(top_won, 1):
-        text += f"{i}. {name[:15]} — {won} ⭐\n"
-    
-    text += "\n🎁 <b>По подаркам:</b>\n"
-    for i, (name, sent) in enumerate(top_gifts, 1):
-        text += f"{i}. {name[:15]} — {sent} подарков\n"
     
     await callback.message.edit_caption(
         caption=text,
@@ -1335,34 +1088,22 @@ async def leaderboard_button(callback: types.CallbackQuery):
     await callback.answer()
 
 # ===== РОЗЫГРЫШ =====
-@dp.callback_query_handler(lambda c: c.data == "raffle_info")
+@dp.callback_query_handler(lambda c: c.data == "raffle")
 async def raffle_info(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    
-    cursor.execute("SELECT id, prize_pool, created_at FROM raffles WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1")
+    cursor.execute("SELECT prize_pool, created_at FROM raffles WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1")
     raffle = cursor.fetchone()
     
     if raffle:
-        raffle_id, prize_pool, created_at = raffle
-        cursor.execute("SELECT ticket_count FROM raffle_tickets WHERE raffle_id=? AND user_id=?", (raffle_id, user_id))
-        tickets = cursor.fetchone()
-        user_tickets = tickets[0] if tickets else 0
-        
-        cursor.execute("SELECT COUNT(DISTINCT user_id) FROM raffle_tickets WHERE raffle_id=?", (raffle_id,))
-        participants = cursor.fetchone()[0]
-        
+        prize_pool, created_at = raffle
         end_date = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S") + timedelta(days=7)
         days_left = (end_date - datetime.now()).days
         
         text = f"🎁 <b>ЕЖЕНЕДЕЛЬНЫЙ РОЗЫГРЫШ</b>\n\n"
         text += f"💰 Призовой фонд: <b>{prize_pool} ⭐</b>\n"
-        text += f"👥 Участников: <b>{participants}</b>\n"
-        text += f"🎫 Ваши билеты: <b>{user_tickets}</b>\n\n"
         text += f"⏳ Осталось дней: <b>{days_left}</b>\n\n"
         text += f"<b>Как получить билеты?</b>\n"
-        text += f"• Отправляйте подарки — 1 билет\n"
-        text += f"• Выигрывайте в играх — бонусные билеты\n"
-        text += f"• Открывайте кейсы — +билеты\n\n"
+        text += f"• Покупайте подарки в магазине\n"
+        text += f"• Выигрывайте в играх\n\n"
         text += f"🏆 Победитель получит 50% призового фонда!"
     else:
         text = "🎁 <b>РОЗЫГРЫШ</b>\n\nСкоро начнётся новый розыгрыш!"
@@ -1370,35 +1111,59 @@ async def raffle_info(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.HTML)
     await callback.answer()
 
-# ===== ОТПРАВИТЬ ПОДАРОК =====
-@dp.callback_query_handler(lambda c: c.data == "send_gift")
-async def send_gift_button(callback: types.CallbackQuery):
-    text = "🎁 <b>ОТПРАВИТЬ ПОДАРОК</b>\n\n"
-    text += "Функция отправки подарков в разработке!\n\n"
-    text += "А пока вы можете:\n"
-    text += "• Купить подарок в магазине\n"
-    text += "• Выиграть в играх\n"
-    text += "• Открыть кейс"
+# ===== ИНВЕНТАРЬ =====
+@dp.callback_query_handler(lambda c: c.data == "inventory")
+async def show_inventory(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    cursor.execute("SELECT gift_name, gift_value, gift_rarity FROM inventory WHERE user_id=? ORDER BY obtained_at DESC LIMIT 20", (user_id,))
+    items = cursor.fetchall()
     
-    await callback.message.edit_caption(
-        caption=text,
-        reply_markup=back_button(),
-        parse_mode=ParseMode.HTML
-    )
+    if not items:
+        text = "🎒 **ИНВЕНТАРЬ**\n\nУ тебя пока нет подарков.\n\nКак получить подарки?\n• Купи в магазине\n• Выиграй в игре Upgrade"
+    else:
+        text = f"🎒 **ИНВЕНТАРЬ**\n\nВсего подарков: {len(items)}\n\n"
+        for name, value, rarity in items:
+            text += f"• {name} — {value}⭐ ({rarity})\n"
+    
+    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
+    await callback.answer()
+
+# ===== ДОСТИЖЕНИЯ =====
+@dp.callback_query_handler(lambda c: c.data == "achievements")
+async def show_achievements(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    
+    cursor.execute("SELECT id, name, description, reward_stars, icon FROM achievements")
+    all_achievements = cursor.fetchall()
+    
+    cursor.execute("SELECT achievement_id FROM user_achievements WHERE user_id=?", (user_id,))
+    unlocked_ids = {row[0] for row in cursor.fetchall()}
+    
+    text = "🏆 **ДОСТИЖЕНИЯ**\n\n"
+    
+    for ach_id, name, desc, reward, icon in all_achievements:
+        if ach_id in unlocked_ids:
+            text += f"✅ {icon} <b>{name}</b> — {desc} (+{reward}⭐)\n"
+        else:
+            text += f"🔒 {icon} {name} — {desc} (+{reward}⭐)\n"
+    
+    text += "\n<i>Открывайте достижения, чтобы получать бонусы!</i>"
+    
+    await callback.message.edit_caption(caption=text, reply_markup=back_button(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 @dp.callback_query_handler(lambda c: c.data == "noop")
 async def noop_callback(callback: types.CallbackQuery):
     await callback.answer("🔴 Сначала открой хотя бы одну клетку!")
 
-# ===== ЕЖЕНЕДЕЛЬНАЯ ПРОВЕРКА РОЗЫГРЫША =====
+# ===== ЕЖЕНЕДЕЛЬНЫЙ РОЗЫГРЫШ =====
 async def weekly_raffle_check():
     while True:
         try:
-            cursor.execute("SELECT id, week_number, created_at, prize_pool FROM raffles WHERE ended_at IS NULL")
+            cursor.execute("SELECT id, created_at, prize_pool FROM raffles WHERE ended_at IS NULL")
             raffles = cursor.fetchall()
             
-            for raffle_id, week_num, created_at, prize_pool in raffles:
+            for raffle_id, created_at, prize_pool in raffles:
                 created = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
                 if datetime.now() - created >= timedelta(days=7):
                     cursor.execute("SELECT user_id, ticket_count FROM raffle_tickets WHERE raffle_id=?", (raffle_id,))
@@ -1409,23 +1174,24 @@ async def weekly_raffle_check():
                         for user_id, count in tickets:
                             all_tickets.extend([user_id] * count)
                         
-                        winner_id = random.choice(all_tickets)
-                        winner_amount = prize_pool // 2
-                        
-                        update_balance(winner_id, winner_amount)
-                        
-                        cursor.execute("UPDATE raffles SET winner_id=?, winner_amount=?, ended_at=? WHERE id=?", 
-                                     (winner_id, winner_amount, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), raffle_id))
-                        
-                        try:
-                            await bot.send_message(winner_id, 
-                                f"🎉 <b>ПОЗДРАВЛЯЕМ!</b> 🎉\n\n"
-                                f"Вы выиграли еженедельный розыгрыш!\n"
-                                f"💰 Выигрыш: {winner_amount} ⭐\n\n"
-                                f"Спасибо за участие в Zenvira Gift!",
-                                parse_mode=ParseMode.HTML)
-                        except:
-                            pass
+                        if all_tickets:
+                            winner_id = random.choice(all_tickets)
+                            winner_amount = prize_pool // 2
+                            
+                            update_balance(winner_id, winner_amount)
+                            
+                            cursor.execute("UPDATE raffles SET winner_id=?, winner_amount=?, ended_at=? WHERE id=?", 
+                                         (winner_id, winner_amount, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), raffle_id))
+                            
+                            try:
+                                await bot.send_message(winner_id, 
+                                    f"🎉 <b>ПОЗДРАВЛЯЕМ!</b> 🎉\n\n"
+                                    f"Вы выиграли еженедельный розыгрыш!\n"
+                                    f"💰 Выигрыш: {winner_amount} ⭐\n\n"
+                                    f"Спасибо за участие!",
+                                    parse_mode=ParseMode.HTML)
+                            except:
+                                pass
                     
                     new_week_num = datetime.now().isocalendar()[1]
                     cursor.execute("INSERT INTO raffles (week_number, prize_pool, created_at) VALUES (?, ?, ?)",
@@ -1461,9 +1227,9 @@ async def on_startup(dp):
     me = await bot.get_me()
     print(f"🤖 Имя бота: @{me.username}")
     print(f"🎮 Игры: CRASH, BOMBS, UPGRADE — активны!")
-    print(f"📦 Кейсы: 3 вида кейсов с подарками!")
-    print(f"🏆 Достижения: 8 достижений с наградами!")
-    print(f"🎁 Розыгрыш: еженедельный с призовым фондом!")
+    print(f"📦 Магазин: 8 товаров!")
+    print(f"🏆 Достижения: 5 достижений!")
+    print(f"🎁 Розыгрыш: еженедельный!")
     print("=" * 50)
 
 async def on_shutdown(dp):
