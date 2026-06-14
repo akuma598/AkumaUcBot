@@ -23,7 +23,6 @@ app = Flask(__name__)
 # ========== БАЗА ДАННЫХ ==========
 conn = sqlite3.connect("zenvira.db", check_same_thread=False)
 cursor = conn.cursor()
-
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -51,7 +50,7 @@ def register_user(user_id, username, first_name):
                        (user_id, username or "Anonymous", first_name or "User", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
 
-# ========== HTML MINI APP ==========
+# ========== HTML ==========
 HTML = '''
 <!DOCTYPE html>
 <html>
@@ -67,7 +66,6 @@ HTML = '''
             font-family: Arial, sans-serif;
             color: white;
             padding: 20px;
-            min-height: 100vh;
         }
         .container { max-width: 500px; margin: 0 auto; }
         .balance {
@@ -75,7 +73,7 @@ HTML = '''
             border-radius: 20px;
             padding: 20px;
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         .balance span { font-size: 36px; color: #ffd700; font-weight: bold; }
         .game-card {
@@ -88,7 +86,7 @@ HTML = '''
         }
         .game-card:active { background: rgba(255,255,255,0.2); }
         .game-icon { font-size: 48px; }
-        .game-name { font-size: 24px; margin-top: 10px; }
+        .game-name { font-size: 20px; margin-top: 10px; }
         .back-btn {
             background: rgba(255,255,255,0.1);
             border: none;
@@ -104,16 +102,26 @@ HTML = '''
             color: #ffd700;
             margin: 20px 0;
         }
-        .bet-btn, .action-btn {
+        .bet-btn {
             background: rgba(255,255,255,0.1);
             border: none;
-            padding: 12px 20px;
+            padding: 10px 15px;
             color: white;
             border-radius: 10px;
             margin: 5px;
             cursor: pointer;
         }
-        .action-btn { background: linear-gradient(135deg, #667eea, #764ba2); width: 100%; margin-top: 15px; }
+        .action-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+            padding: 15px;
+            color: white;
+            border-radius: 10px;
+            width: 100%;
+            margin: 10px 0;
+            cursor: pointer;
+            font-size: 16px;
+        }
         .cashout-btn { background: linear-gradient(135deg, #f093fb, #f5576c); }
         input {
             background: rgba(255,255,255,0.1);
@@ -143,6 +151,9 @@ HTML = '''
         }
         .cell.opened { background: rgba(0,255,0,0.2); }
         .cell.bomb { background: rgba(255,0,0,0.3); }
+        .players { background: rgba(255,255,255,0.05); border-radius: 15px; padding: 15px; margin-top: 20px; }
+        .players h3 { margin-bottom: 10px; }
+        .player { display: flex; justify-content: space-between; padding: 5px 0; }
     </style>
 </head>
 <body>
@@ -155,6 +166,9 @@ HTML = '''
         let crashInterval = null;
         let currentBet = 0;
         let active = false;
+        let fieldSize = 3;
+        let bombsCount = 3;
+        let game = null;
         
         async function api(url, data = null) {
             let opts = { method: data ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
@@ -190,13 +204,18 @@ HTML = '''
                 <button class="back-btn" onclick="goBack()">← Назад</button>
                 <div class="multiplier" id="multiplier">1.00x</div>
                 <div class="balance">⭐ ${balance}</div>
-                <div class="bet-buttons">
-                    ${[10,50,100,250,500,1000].map(v => `<button class="bet-btn" onclick="setBet(${v})">${v}</button>`).join('')}
+                <div>
+                    <button class="bet-btn" onclick="setBet(10)">10</button>
+                    <button class="bet-btn" onclick="setBet(50)">50</button>
+                    <button class="bet-btn" onclick="setBet(100)">100</button>
+                    <button class="bet-btn" onclick="setBet(250)">250</button>
+                    <button class="bet-btn" onclick="setBet(500)">500</button>
+                    <button class="bet-btn" onclick="setBet(1000)">1000</button>
                 </div>
                 <input type="number" id="betInput" placeholder="Своя сумма">
                 <button class="action-btn" id="betBtn" onclick="placeBet()">Сделать ставку</button>
                 <button class="action-btn cashout-btn" id="cashoutBtn" onclick="cashOut()" style="display:none">💰 ЗАБРАТЬ</button>
-                <div id="players"></div>
+                <div class="players" id="players"><h3>👥 Игроки</h3></div>
             `;
         }
         
@@ -205,12 +224,25 @@ HTML = '''
             document.getElementById('app').innerHTML = `
                 <button class="back-btn" onclick="goBack()">← Назад</button>
                 <div class="balance">⭐ ${balance}</div>
-                <div><button class="bet-btn" onclick="setFieldSize(3)">3x3</button><button class="bet-btn" onclick="setFieldSize(5)">5x5</button></div>
+                <div>
+                    <button class="bet-btn" onclick="setFieldSize(3)">3x3</button>
+                    <button class="bet-btn" onclick="setFieldSize(5)">5x5</button>
+                </div>
                 <div>💣 Бомб: <input type="range" id="bombsRange" min="1" max="8" value="3" onchange="updateBombs()"> <span id="bombsVal">3</span></div>
-                <div class="bet-buttons">${[10,50,100,250,500,1000].map(v => `<button class="bet-btn" onclick="setBet(${v})">${v}</button>`).join('')}</div>
+                <div>
+                    <button class="bet-btn" onclick="setBet(10)">10</button>
+                    <button class="bet-btn" onclick="setBet(50)">50</button>
+                    <button class="bet-btn" onclick="setBet(100)">100</button>
+                    <button class="bet-btn" onclick="setBet(250)">250</button>
+                    <button class="bet-btn" onclick="setBet(500)">500</button>
+                    <button class="bet-btn" onclick="setBet(1000)">1000</button>
+                </div>
                 <button class="action-btn" onclick="startBombsGame()">Начать игру</button>
                 <div id="gameField" class="field" style="display:none"></div>
-                <div id="gameInfo" style="display:none"><div id="gameMultiplier">1.00x</div><button class="action-btn cashout-btn" onclick="cashOutBombs()">ЗАБРАТЬ</button></div>
+                <div id="gameInfo" style="display:none">
+                    <div id="gameMultiplier" style="font-size:24px; text-align:center; margin:10px">1.00x</div>
+                    <button class="action-btn cashout-btn" onclick="cashOutBombs()">ЗАБРАТЬ</button>
+                </div>
             `;
         }
         
@@ -230,8 +262,6 @@ HTML = '''
             let data = await api('/api/crash/cashout', {user_id: userId});
             if(data.success) { active = false; tg.showPopup({title:'Успех', message:`Забрал ${data.win}⭐!`}); renderCrash(); }
         }
-        
-        let fieldSize = 3, bombsCount = 3, game = null;
         
         async function startBombsGame() {
             if(!currentBet) { tg.showPopup({title:'Ошибка', message:'Выберите ставку!'}); return; }
@@ -276,7 +306,12 @@ HTML = '''
         }
         
         function resetBombs() { game = null; renderBombs(); }
-        function goBack() { if(crashInterval) clearInterval(crashInterval); view = 'main'; renderMain(); }
+        
+        async function goBack() {
+            if(crashInterval) clearInterval(crashInterval);
+            view = 'main';
+            renderMain();
+        }
         
         async function startCrashUpdates() {
             if(crashInterval) clearInterval(crashInterval);
@@ -300,7 +335,7 @@ HTML = '''
                 if(playersDiv) {
                     playersDiv.innerHTML = '<h3>👥 Игроки</h3>';
                     for(let [id, bet] of Object.entries(data.bets)) {
-                        playersDiv.innerHTML += `<div>👤 ${bet.user_name} — ${bet.amount}⭐ — ${bet.multiplier.toFixed(2)}x</div>`;
+                        playersDiv.innerHTML += `<div class="player"><span>👤 ${bet.user_name}</span><span>${bet.amount}⭐</span><span>${bet.multiplier.toFixed(2)}x</span></div>`;
                     }
                 }
             }, 500);
@@ -519,7 +554,7 @@ def run_flask():
 
 async def on_startup(dp):
     asyncio.create_task(crash_loop())
-    print("✅ Бот Zenvira Gift запущен!")
+    print("✅ Бот запущен!")
 
 if __name__ == "__main__":
     Thread(target=run_flask, daemon=True).start()
