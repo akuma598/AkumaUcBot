@@ -1,10 +1,15 @@
 import os
+import sqlite3
+import random
+import asyncio
+import time
+import secrets
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode, WebAppInfo
 from aiogram.utils import executor
-from flask import Flask, send_file, send_from_directory
+from flask import Flask, request, jsonify
 from threading import Thread
-import io
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -15,8 +20,71 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 app = Flask(__name__)
 
-# ========== HTML СТРАНИЦА С ИГРАМИ ==========
-HTML_CONTENT = '''<!DOCTYPE html>
+# ID фотографии
+PHOTO_ID = "AgACAgIAAxkBAAEqq-5qLrP5zJdyZj2-Jxl3Fy-zs7ekuQACRxlrGwHycEmgNUvLeaY5XgEAAwIAA3MAAzwE"
+
+# ========== БАЗА ДАННЫХ ==========
+conn = sqlite3.connect("zenvira.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    first_name TEXT,
+    balance INTEGER DEFAULT 500,
+    level INTEGER DEFAULT 1,
+    exp INTEGER DEFAULT 0,
+    total_won INTEGER DEFAULT 0,
+    referral_code TEXT UNIQUE,
+    referrer_id INTEGER,
+    created_at TEXT
+)
+""")
+conn.commit()
+
+def get_balance(user_id):
+    cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else 500
+
+def update_balance(user_id, amount):
+    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+    conn.commit()
+    if amount > 0:
+        cursor.execute("UPDATE users SET total_won = total_won + ? WHERE user_id=?", (amount, user_id))
+        cursor.execute("SELECT level, exp FROM users WHERE user_id=?", (user_id,))
+        level, exp = cursor.fetchone()
+        new_exp = exp + amount // 10
+        if new_exp >= 1000:
+            new_level = level + new_exp // 1000
+            new_exp = new_exp % 1000
+            cursor.execute("UPDATE users SET level=?, exp=? WHERE user_id=?", (new_level, new_exp, user_id))
+        else:
+            cursor.execute("UPDATE users SET exp=? WHERE user_id=?", (new_exp, user_id))
+    conn.commit()
+
+def register_user(user_id, username, first_name, ref_code=None):
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    if not cursor.fetchone():
+        code = secrets.token_urlsafe(8)
+        referrer = None
+        if ref_code:
+            cursor.execute("SELECT user_id FROM users WHERE referral_code=?", (ref_code,))
+            referrer = cursor.fetchone()
+        
+        cursor.execute("""
+            INSERT INTO users (user_id, username, first_name, referral_code, referrer_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (user_id, username or "Anonymous", first_name or "User", code, 
+              referrer[0] if referrer else None, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        
+        if referrer:
+            update_balance(referrer[0], 100)
+        conn.commit()
+
+# ========== HTML MINI APP ==========
+HTML = '''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -147,6 +215,19 @@ HTML_CONTENT = '''<!DOCTYPE html>
             cursor: pointer;
         }
         .size-btn.active { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .referral-box {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+        }
+        .referral-code {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 10px;
+            margin: 15px 0;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -179,6 +260,7 @@ HTML_CONTENT = '''<!DOCTYPE html>
         
         async function renderMain() {
             let balance = await getBalance();
+            let levelData = await api(`/api/profile?user_id=${userId}`);
             document.getElementById('app').innerHTML = `
                 <div class="balance">⭐ <span>${balance}</span></div>
                 <div class="game-card" onclick="startCrash()">
@@ -188,6 +270,46 @@ HTML_CONTENT = '''<!DOCTYPE html>
                 <div class="game-card" onclick="startBombs()">
                     <div class="game-icon">💣</div>
                     <div class="game-name">BOMBS</div>
+                </div>
+                <div class="game-card" onclick="openReferral()">
+                    <div class="game-icon">👥</div>
+                    <div class="game-name">РЕФЕРАЛЫ</div>
+                </div>
+                <div class="game-card" onclick="openProfile()">
+                    <div class="game-icon">👤</div>
+                    <div class="game-name">ПРОФИЛЬ</div>
+                </div>
+            `;
+        }
+        
+        async function openProfile() {
+            let data = await api(`/api/profile?user_id=${userId}`);
+            let balance = await getBalance();
+            document.getElementById('app').innerHTML = `
+                <button class="back-btn" onclick="renderMain()">← Назад</button>
+                <div class="balance">⭐ <span>${balance}</span></div>
+                <div class="referral-box">
+                    <div style="font-size:48px">👤</div>
+                    <div style="font-size:20px; font-weight:bold">${data.first_name}</div>
+                    <div>🎚️ Уровень: <b>${data.level}</b></div>
+                    <div>📊 Опыт: ${data.exp}/1000</div>
+                    <div>🏆 Выиграно: <b>${data.total_won}</b> ⭐</div>
+                </div>
+            `;
+        }
+        
+        async function openReferral() {
+            let data = await api(`/api/referral?user_id=${userId}`);
+            let link = `https://t.me/${tg.initDataUnsafe?.user?.username || 'zenvira_gift_bot'}?start=ref_${data.code}`;
+            document.getElementById('app').innerHTML = `
+                <button class="back-btn" onclick="renderMain()">← Назад</button>
+                <div class="referral-box">
+                    <div style="font-size:48px">👥</div>
+                    <div style="font-size:20px; font-weight:bold">РЕФЕРАЛЫ</div>
+                    <div>👥 Приглашено: <b>${data.count}</b></div>
+                    <div>💰 Заработано: <b>${data.earnings}</b> ⭐</div>
+                    <div class="referral-code"><code>${link}</code></div>
+                    <button class="action-btn" onclick="tg.openTelegramLink('https://t.me/share/url?url=${encodeURIComponent(link)}&text=Присоединяйся к Zenvira Gift!')">📤 ПОДЕЛИТЬСЯ</button>
                 </div>
             `;
         }
@@ -202,7 +324,7 @@ HTML_CONTENT = '''<!DOCTYPE html>
         async function renderCrash() {
             let balance = await getBalance();
             document.getElementById('app').innerHTML = `
-                <button class="back-btn" onclick="goBack()">← Назад</button>
+                <button class="back-btn" onclick="renderMain()">← Назад</button>
                 <div class="multiplier" id="multiplier">1.00x</div>
                 <div class="balance">⭐ ${balance}</div>
                 <div class="bet-buttons">
@@ -223,7 +345,7 @@ HTML_CONTENT = '''<!DOCTYPE html>
         async function renderBombs() {
             let balance = await getBalance();
             document.getElementById('app').innerHTML = `
-                <button class="back-btn" onclick="goBack()">← Назад</button>
+                <button class="back-btn" onclick="renderMain()">← Назад</button>
                 <div class="balance">⭐ ${balance}</div>
                 <div class="size-select">
                     <button class="size-btn ${fieldSize===3?'active':''}" onclick="setFieldSize(3)">3x3</button>
@@ -342,12 +464,6 @@ HTML_CONTENT = '''<!DOCTYPE html>
         
         function resetBombs() { game = null; renderBombs(); }
         
-        async function goBack() {
-            if(updateInterval) clearInterval(updateInterval);
-            view = 'main';
-            renderMain();
-        }
-        
         async function startCrashUpdates() {
             if(updateInterval) clearInterval(updateInterval);
             updateInterval = setInterval(async () => {
@@ -458,15 +574,33 @@ class BombsGameObj:
             return win
         return 0
 
-# ========== FLASK ==========
+# ========== FLASK API ==========
 @app.route('/')
 def index():
-    return HTML_CONTENT
+    return HTML
 
 @app.route('/api/balance')
 def balance():
     uid = int(request.args.get('user_id'))
     return {'balance': get_balance(uid)}
+
+@app.route('/api/profile')
+def profile():
+    uid = int(request.args.get('user_id'))
+    cursor.execute("SELECT first_name, level, exp, total_won FROM users WHERE user_id=?", (uid,))
+    row = cursor.fetchone()
+    if row:
+        return {'first_name': row[0], 'level': row[1], 'exp': row[2] % 1000, 'total_won': row[3]}
+    return {'first_name': 'User', 'level': 1, 'exp': 0, 'total_won': 0}
+
+@app.route('/api/referral')
+def referral():
+    uid = int(request.args.get('user_id'))
+    cursor.execute("SELECT referral_code, referral_earnings FROM users WHERE user_id=?", (uid,))
+    row = cursor.fetchone()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE referrer_id=?", (uid,))
+    count = cursor.fetchone()[0]
+    return {'code': row[0] if row else '', 'earnings': row[1] if row else 0, 'count': count}
 
 @app.route('/api/crash/state')
 def crash_state():
@@ -585,11 +719,34 @@ def bombs_cashout():
 @dp.message_handler(commands=['start'])
 async def start_cmd(message: types.Message):
     user = message.from_user
-    register_user(user.id, user.username, user.first_name)
-    webapp_url = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN') or 'your-domain.railway.app'}"
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(InlineKeyboardButton("🎮 ОТКРЫТЬ ИГРЫ", web_app=WebAppInfo(url=webapp_url)))
-    await message.reply(f"✨ Zenvira Gift ✨\n\n⭐ Баланс: {get_balance(user.id)}\n\n👇 Нажми на кнопку!", reply_markup=kb)
+    args = message.get_args()
+    ref = args if args and args.startswith("ref_") else None
+    
+    register_user(user.id, user.username, user.first_name, ref)
+    
+    webapp_url = f"https://{os.environ.get('RAILWAY_PUBLIC_DOMAIN', 'your-domain.railway.app')}"
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🎮 ИГРАТЬ", web_app=WebAppInfo(url=webapp_url)),
+        InlineKeyboardButton("📢 КАНАЛ", url="https://t.me/zenviragift")
+    )
+    kb.add(InlineKeyboardButton("💬 ЧАТ", url="https://t.me/zenviragift_chat"))
+    
+    text = (
+        "✨ <b>Zenvira Gift</b> ✨\n\n"
+        "🚀 <b>Crash</b>, 💣 <b>Бомбы</b>, ⬆️ <b>Апгрейды</b> и многое другое! 💥💣⬆️\n\n"
+        "⭐ <b>Telegram Stars</b> — основная валюта\n\n"
+        "📢 <b>Подпишись на канал и заходи в чат!</b> 💬⭐\n\n"
+        f"👇 <b>Твой баланс: {get_balance(user.id)} ⭐</b>"
+    )
+    
+    await message.reply_photo(
+        photo=PHOTO_ID,
+        caption=text,
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML
+    )
 
 # ========== ЗАПУСК ==========
 def run_flask():
@@ -598,44 +755,12 @@ def run_flask():
 
 async def on_startup(dp):
     asyncio.create_task(crash_loop())
-    print("=" * 40)
-    print("✅ БОТ ЗАПУЩЕН!")
-    print("=" * 40)
+    print("=" * 50)
+    print("✅ БОТ Zenvira Gift ЗАПУЩЕН!")
+    print("🎮 Игры: CRASH, BOMBS")
+    print("📢 Канал: https://t.me/zenviragift")
+    print("=" * 50)
 
 if __name__ == "__main__":
-    from flask import request
-    import random, asyncio, time, secrets, sqlite3
-    from datetime import datetime
-    
-    # База данных и функции
-    conn = sqlite3.connect("zenvira.db", check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        first_name TEXT,
-        balance INTEGER DEFAULT 500,
-        created_at TEXT
-    )
-    """)
-    conn.commit()
-    
-    def get_balance(user_id):
-        cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-        result = cursor.fetchone()
-        return result[0] if result else 500
-    
-    def update_balance(user_id, amount):
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
-        conn.commit()
-    
-    def register_user(user_id, username, first_name):
-        cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-        if not cursor.fetchone():
-            cursor.execute("INSERT INTO users (user_id, username, first_name, created_at) VALUES (?, ?, ?, ?)",
-                           (user_id, username or "Anonymous", first_name or "User", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            conn.commit()
-    
     Thread(target=run_flask, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
