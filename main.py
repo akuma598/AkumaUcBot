@@ -920,4 +920,4 @@ if __name__ == "__main__":
     flask_thread.start()
     
     # Запускаем бота
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
+    execu tor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
