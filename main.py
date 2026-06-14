@@ -8,7 +8,7 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from aiogram.utils import executor
-from flask import Flask, jsonify
+from flask import Flask
 from threading import Thread
 
 API_TOKEN = os.environ.get("BOT_TOKEN")
@@ -320,7 +320,6 @@ def welcome_menu():
         glass_button("🎮 ИГРАТЬ", "main_menu"),
         glass_button("📢 КАНАЛ", "channel")
     )
-    kb.add(glass_button("💬 ЧАТ", "chat"))
     return kb
 
 def main_menu():
@@ -356,7 +355,7 @@ async def start_cmd(message: types.Message):
         "✨ **Zenvira Gift** ✨\n\n"
         "🚀 **Crash**, 💣 **Bombs**, ⬆️ **Upgrade** и многое другое!\n\n"
         "💥 Присоединяйся, делай ставки и выигрывай подарки!\n\n"
-        "🔗 **Подпишись на канал и заходи в чат:**\n"
+        "🔗 **Подпишись на канал:**\n"
         "👉 https://t.me/zenviragift\n\n"
         "👇 Нажми **ИГРАТЬ**, чтобы начать!"
     )
@@ -366,11 +365,6 @@ async def start_cmd(message: types.Message):
 async def channel_cmd(callback: types.CallbackQuery):
     await callback.answer()
     await bot.send_message(callback.from_user.id, "📢 **Наш канал:** https://t.me/zenviragift", parse_mode=ParseMode.MARKDOWN)
-
-@dp.callback_query_handler(lambda c: c.data == "chat")
-async def chat_cmd(callback: types.CallbackQuery):
-    await callback.answer()
-    await bot.send_message(callback.from_user.id, "💬 **Чат поддержки:** https://t.me/zenviragift", parse_mode=ParseMode.MARKDOWN)
 
 @dp.callback_query_handler(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: types.CallbackQuery):
@@ -913,16 +907,14 @@ def run_flask():
 async def on_startup(dp):
     asyncio.create_task(crash_game_loop())
     print("Бот Zenvira Gift успешно запущен!")
-    print(f"Bot @{(await bot.get_me()).username} готов к работе!")
+    me = await bot.get_me()
+    print(f"Bot @{me.username} готов к работе!")
 
 async def on_shutdown(dp):
     print("Бот останавливается...")
     await bot.close()
 
 if __name__ == "__main__":
-    # Запускаем Flask в отдельном потоке для Railway
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    
-    # Запускаем бота
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=on_shutdown)
